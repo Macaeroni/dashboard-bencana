@@ -56,6 +56,7 @@ Struktur file:
     3. Parser koordinat & pembangkit data simulasi
     4. Pemuatan data: deteksi format BPBD / format sederhana / simulasi
     5. Sidebar: filter kecamatan, jenis bencana, tahun
+    5.5 Bar logo (kanan atas, sejajar tab) & peta analisis 2026
     6. Baris KPI ringkasan
     7. Peta sebaran titik kejadian
     8. Tren bulanan per jenis bencana
@@ -65,6 +66,7 @@ Struktur file:
     12. Tabel log kejadian terbaru
 """
 
+import base64
 import re
 import os
 
@@ -127,7 +129,33 @@ button[data-baseweb="tab"] {
     height: auto !important;
 }
 [data-baseweb="tab-highlight"] { height: 2.5px !important; }
-.block-container { padding-top: 3.5rem; padding-bottom: 3rem; max-width: 1360px; }
+.block-container {
+    padding-top: 3.5rem; padding-bottom: 3rem; max-width: 1360px;
+    padding-left: 3rem; padding-right: 3rem;
+    position: relative;
+}
+/* Logo di ujung kanan, sejajar baris tab */
+div[data-testid="stElementContainer"]:has(.logo-bar),
+.element-container:has(.logo-bar) {
+    position: absolute;
+    top: 3.5rem;
+    right: 3rem;
+    height: 44px;
+    width: auto;
+    z-index: 5;
+}
+.logo-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    height: 44px;
+}
+.logo-bar img {
+    height: 28px;
+    width: auto;
+    object-fit: contain;
+}
 div[data-testid="stMetric"] {
     background: rgba(127,127,127,0.06);
     border: 1px solid rgba(127,127,127,0.18);
@@ -207,6 +235,7 @@ KECAMATAN_BOGOR = [
 
 MAP_CENTER = {"lat": -6.55, "lon": 106.80}
 MAP_ZOOM = 9.4
+LOGO_DIR = "logos"  # taruh logo_ipb.png, logo_bpbd.png, logo_bmkg.png di sini (tampil di kanan atas, sejajar tab)
 
 # ---------------------------------------------------------------------------
 # 3. PARSER KOORDINAT & PEMBANGKIT DATA SIMULASI
@@ -658,8 +687,40 @@ df_risk = compute_risk_index(df, df_meteo)
 
 
 # ---------------------------------------------------------------------------
-# 5.5 PETA HASIL ANALISIS BENCANA 2026 (per jenis bencana) — util & tab
+# 5.5 BAR LOGO (kanan atas, sejajar tab) & PETA HASIL ANALISIS BENCANA 2026
 # ---------------------------------------------------------------------------
+
+
+def html_logo_bar() -> str:
+    """Membuat bar logo (IPB, BPBD, BMKG) sebagai HTML dengan gambar
+    ter-embed base64, supaya bisa diposisikan lewat CSS di ujung kanan
+    sejajar tombol tab. Logo yang filenya belum ada dilewati. File logo
+    dicari di folder LOGO_DIR (logo_ipb, logo_bpbd, logo_bmkg; format
+    png/jpg/jpeg)."""
+    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+    img_tags = []
+    for label, nama_file in [
+        ("IPB University", "logo_ipb"),
+        ("BPBD Kab. Bogor", "logo_bpbd"),
+        ("BMKG", "logo_bmkg"),
+    ]:
+        for ext in ["png", "jpg", "jpeg"]:
+            path = os.path.join(LOGO_DIR, f"{nama_file}.{ext}")
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                img_tags.append(f'<img src="data:{mime[ext]};base64,{b64}" alt="{label}" title="{label}">')
+                break
+    if not img_tags:
+        return ""
+    return f'<div class="logo-bar">{"".join(img_tags)}</div>'
+
+
+_logo_html = html_logo_bar()
+if _logo_html:
+    st.markdown(_logo_html, unsafe_allow_html=True)
+
+
 # Peta pada bagian ini BUKAN digambar otomatis dari data kejadian di atas,
 # melainkan hasil analisis yang sudah disiapkan terpisah (mis. dari QGIS/
 # ArcGIS/Kepler.gl) untuk tahun 2026, satu peta per jenis bencana. Taruh
