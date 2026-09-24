@@ -182,6 +182,35 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
     opacity: 0.85;
     margin-bottom: 1rem;
 }
+
+/* Layar kecil (HP): logo di baris sendiri, tab turun di bawahnya */
+@media (max-width: 768px) {
+    .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    div[data-testid="stElementContainer"]:has(.logo-bar),
+    .element-container:has(.logo-bar) {
+        right: 1rem;
+        left: 1rem;
+    }
+    .logo-bar {
+        justify-content: flex-end;
+        gap: 10px;
+    }
+    .logo-bar img {
+        height: 24px;
+    }
+    /* turunkan tab utama supaya tidak tertimpa logo */
+    [data-testid="stTabs"] > [data-baseweb="tab-list"] {
+        margin-top: 52px;
+    }
+    /* tab di dalam tab (mis. "Curah hujan per kecamatan") tidak ikut turun */
+    [data-testid="stTabs"] [data-testid="stTabs"] > [data-baseweb="tab-list"] {
+        margin-top: 0;
+    }
+}
+
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
