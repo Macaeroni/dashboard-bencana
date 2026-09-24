@@ -162,12 +162,15 @@ div[data-testid="stMetric"] {
     border-radius: 10px;
     padding: 12px 16px 8px;
 }
-div[data-testid="stMetricLabel"] { font-size: 0.8rem; opacity: 0.75; }
-div[data-testid="stMetricValue"] {
-    white-space: normal;
-    overflow-wrap: break-word;
-    line-height: 1.2;
-    font-size: 1.6rem;
+div[data-testid="stMetricLabel"],
+div[data-testid="stMetricLabel"] p,
+div[data-testid="stMetricLabel"] div {
+    font-size: 0.8rem;
+    opacity: 0.75;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.25;
 }
 h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
 .dash-caption { color: rgba(127,127,127,0.9); font-size: 0.85rem; margin-top: -8px; }
@@ -961,12 +964,13 @@ with tab_utama:
     # ---------------------------------------------------------------------------
 
     st.markdown("#### Indikator meteorologi")
+    st.caption("Nilai rata-rata seluruh kecamatan (data simulasi).")
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Curah hujan rata-rata (mm/hari)", f"{df_meteo['curah_hujan_mm_hari'].mean():.1f}")
-    m2.metric("Suhu rata-rata (°C)", f"{df_meteo['suhu_c'].mean():.1f}")
-    m3.metric("Kelembaban rata-rata (%)", f"{df_meteo['kelembaban_persen'].mean():.0f}")
-    m4.metric("Kecepatan angin rata-rata (km/jam)", f"{df_meteo['kecepatan_angin_kmh'].mean():.1f}")
+    m1.metric("Curah Hujan (mm/hari)", f"{df_meteo['curah_hujan_mm_hari'].mean():.1f}")
+    m2.metric("Suhu (°C)", f"{df_meteo['suhu_c'].mean():.1f}")
+    m3.metric("Kelembaban (%)", f"{df_meteo['kelembaban_persen'].mean():.0f}")
+    m4.metric("Kecepatan Angin (km/jam)", f"{df_meteo['kecepatan_angin_kmh'].mean():.1f}")
 
     tab1, tab2 = st.tabs(["Curah hujan per kecamatan", "Tabel indikator lengkap"])
 
