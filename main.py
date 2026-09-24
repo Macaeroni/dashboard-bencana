@@ -618,6 +618,22 @@ with st.sidebar:
     tahun_opsi = sorted(df_all["tanggal"].dt.year.unique(), reverse=True)
     tahun_pilih = st.multiselect("Tahun", tahun_opsi, default=tahun_opsi)
 
+    NAMA_BULAN = {
+        1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
+        7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember",
+    }
+    # Opsi bulan hanya diambil dari data pada tahun yang sedang dipilih, supaya
+    # daftar bulannya relevan (mis. kalau data 2026 baru sampai September,
+    # bulan Oktober-Desember tidak muncul di daftar).
+    df_untuk_opsi_bulan = df_all[df_all["tanggal"].dt.year.isin(tahun_pilih)] if tahun_pilih else df_all
+    bulan_angka_tersedia = sorted(df_untuk_opsi_bulan["tanggal"].dt.month.unique())
+    bulan_opsi = [NAMA_BULAN[b] for b in bulan_angka_tersedia]
+    bulan_pilih_nama = st.multiselect(
+        "Bulan", bulan_opsi, default=[], placeholder="Semua bulan"
+    )
+    NAMA_KE_ANGKA_BULAN = {v: k for k, v in NAMA_BULAN.items()}
+    bulan_pilih_angka = [NAMA_KE_ANGKA_BULAN[b] for b in bulan_pilih_nama]
+
     jenis_opsi = sorted(df_all["jenis_bencana"].unique())
     jenis_pilih = st.multiselect("Jenis bencana", jenis_opsi, default=jenis_opsi)
 
@@ -633,6 +649,8 @@ with st.sidebar:
     )
 
 df = df_all[df_all["tanggal"].dt.year.isin(tahun_pilih) & df_all["jenis_bencana"].isin(jenis_pilih)]
+if bulan_pilih_angka:
+    df = df[df["tanggal"].dt.month.isin(bulan_pilih_angka)]
 if kecamatan_pilih:
     df = df[df["kecamatan"].isin(kecamatan_pilih)]
 
