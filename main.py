@@ -941,13 +941,16 @@ with st.sidebar:
     )
 
     uploaded_meteo_files = st.file_uploader(
-        "Unggah CSV data meteorologi (boleh lebih dari satu file — satu per kecamatan, atau gabungan)",
+        "Unggah folder ATAU beberapa file CSV data meteorologi (satu per kecamatan, atau gabungan)",
         type=["csv"],
-        accept_multiple_files=True,
+        accept_multiple_files="directory",
         help=(
-            "Bisa unggah beberapa file sekaligus tanpa perlu digabung manual. Tiap file "
-            "boleh berisi satu kecamatan (nama kecamatan dikenali dari nama filenya, "
-            "mis. \"cibinong.csv\", atau dari kolom kecamatan di dalam file) atau "
+            "Klik tombol lalu pilih SATU FOLDER yang isinya file-file CSV per "
+            "kecamatan (mis. folder berisi cibinong.csv, gunung_putri.csv, dst) — "
+            "semua file di dalamnya otomatis terunggah tanpa perlu digabung manual. "
+            "Bisa juga pilih beberapa file CSV satu-satu kalau tidak dalam satu folder. "
+            "Tiap file boleh berisi satu kecamatan (nama kecamatan dikenali dari nama "
+            "filenya, mis. \"cibinong.csv\", atau dari kolom kecamatan di dalam file) atau "
             "beberapa kecamatan sekaligus (butuh kolom kecamatan). Nama kolom fleksibel: "
             "\"curah hujan\", \"ch\", \"rr\", \"curah_hujan_mm_hari\" semua dikenali. "
             "Pemisah kolom (koma/titik koma) dan format angka desimal (titik/koma) "
