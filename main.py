@@ -90,6 +90,7 @@ Struktur file:
 import base64
 import re
 import os
+from io import StringIO
 
 import numpy as np
 import pandas as pd
@@ -552,6 +553,46 @@ def _petakan_kolom_meteo(df_csv: pd.DataFrame) -> pd.DataFrame:
     return df_csv.rename(columns=peta_ganti_nama)
 
 
+def _baca_csv_fleksibel(uploaded_file) -> pd.DataFrame:
+    """Membaca CSV meteorologi dengan toleransi format yang lebih longgar
+    daripada pd.read_csv() polos:
+    - pemisah kolom dideteksi otomatis (koma, titik koma, tab, dst),
+      bukan diasumsikan koma — banyak alat ekspor (mis. Climate Engine,
+      Excel versi Indonesia) memakai titik koma;
+    - BOM UTF-8 di awal file (karakter tak kasat mata yang kadang
+      menempel di nama kolom pertama, mis. "\\ufefftanggal") dibuang."""
+    uploaded_file.seek(0)
+    raw = uploaded_file.read()
+    if isinstance(raw, bytes):
+        text = raw.decode("utf-8-sig", errors="replace")
+    else:
+        text = raw.lstrip("\ufeff")
+    uploaded_file.seek(0)
+    return pd.read_csv(StringIO(text), sep=None, engine="python")
+
+
+def _parse_angka(value) -> float:
+    """Mem-parse angka yang mungkin memakai koma sebagai pemisah desimal
+    (format Indonesia, mis. "9,2963") maupun titik (format internasional,
+    mis. "9.2963"), dengan atau tanpa pemisah ribuan. Mengembalikan NaN
+    kalau tidak bisa di-parse sama sekali."""
+    if pd.isna(value):
+        return np.nan
+    s = str(value).strip()
+    if s == "":
+        return np.nan
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    # format Indonesia: titik = pemisah ribuan (dibuang), koma = desimal
+    s2 = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s2)
+    except ValueError:
+        return np.nan
+
+
 def _perlu_pilih_manual_kecamatan(uploaded_file) -> bool:
     """True kalau file TIDAK punya kolom kecamatan yang dikenali DAN nama
     kecamatan tidak bisa ditebak dari nama filenya — sehingga perlu
@@ -559,8 +600,7 @@ def _perlu_pilih_manual_kecamatan(uploaded_file) -> bool:
     if cari_kecamatan_dari_nama_file(uploaded_file.name) is not None:
         return False
     try:
-        uploaded_file.seek(0)
-        preview = pd.read_csv(uploaded_file, nrows=1)
+        preview = _baca_csv_fleksibel(uploaded_file)
         preview.columns = [str(c).strip() for c in preview.columns]
         preview = _petakan_kolom_meteo(preview)
         return "kecamatan" not in preview.columns
@@ -577,8 +617,7 @@ def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
     kalau gagal — supaya file lain tetap bisa diproses walau satu file
     bermasalah."""
     try:
-        uploaded_file.seek(0)
-        df_csv = pd.read_csv(uploaded_file)
+        df_csv = _baca_csv_fleksibel(uploaded_file)
     except Exception:
         return None, f"File `{uploaded_file.name}` gagal dibaca sebagai CSV."
 
@@ -597,7 +636,7 @@ def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
             df_csv[kol] = np.nan
 
     for kol in ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
-        df_csv[kol] = pd.to_numeric(df_csv[kol], errors="coerce")
+        df_csv[kol] = df_csv[kol].apply(_parse_angka)
 
     if "kecamatan" in df_csv.columns and df_csv["kecamatan"].notna().any():
         df_csv["kecamatan"] = df_csv["kecamatan"].astype(str).str.strip()
@@ -911,7 +950,9 @@ with st.sidebar:
             "mis. \"cibinong.csv\", atau dari kolom kecamatan di dalam file) atau "
             "beberapa kecamatan sekaligus (butuh kolom kecamatan). Nama kolom fleksibel: "
             "\"curah hujan\", \"ch\", \"rr\", \"curah_hujan_mm_hari\" semua dikenali. "
-            "Kecamatan yang tidak tercakup di data meteorologi tidak akan tampil di dashboard."
+            "Pemisah kolom (koma/titik koma) dan format angka desimal (titik/koma) "
+            "terdeteksi otomatis. Kecamatan yang tidak tercakup di data meteorologi "
+            "tidak akan tampil di dashboard."
         ),
     )
 
