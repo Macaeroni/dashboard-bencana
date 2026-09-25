@@ -10,8 +10,8 @@ Cara menjalankan:
     pip install streamlit pandas numpy plotly
     streamlit run dashboard_bencana.py
 
-FORMAT CSV YANG DIDUKUNG
--------------------------
+FORMAT CSV YANG DIDUKUNG (DATA KEJADIAN BENCANA)
+--------------------------------------------------
 1. Format asli laporan BPBD Kabupaten Bogor (terdeteksi otomatis),
    dengan ciri: ada baris judul di atas, lalu header berisi kolom
    seperti KECAMATAN, TANGGAL KEJADIAN, LONGITUDE, LATITUDE, dan 8
@@ -34,12 +34,28 @@ FORMAT CSV YANG DIDUKUNG
 Jika CSV yang diunggah tidak cocok dengan kedua format di atas, atau
 tidak ada file yang diunggah, dashboard memakai DATA SIMULASI.
 
-DATA METEOROLOGI:
-    Bisa diunggah lewat CSV terpisah di sidebar (kolom wajib:
-    kecamatan, curah_hujan_mm_hari; opsional: suhu_c,
-    kelembaban_persen, kecepatan_angin_kmh). Kecamatan yang tidak ada
-    di CSV otomatis dilengkapi dari data simulasi (lihat
-    load_meteo_data()). Tanpa file diunggah, seluruhnya simulasi.
+DATA METEOROLOGI (BISA LEBIH DARI SATU FILE)
+-----------------------------------------------
+Bisa diunggah sebagai SATU FILE ATAU BEBERAPA FILE CSV sekaligus,
+tanpa perlu digabung terlebih dahulu — cocok untuk kasus di mana tiap
+kecamatan mengirim laporan cuacanya sendiri-sendiri. Setiap file:
+    - boleh berisi satu kecamatan saja (nama kecamatan ditebak dari
+      nama file, mis. "cibinong.csv", "data_ch_Cibinong_2026.csv";
+      kalau tidak bisa ditebak otomatis, dashboard meminta dipilih
+      manual lewat dropdown di sidebar), ATAU
+    - berisi banyak kecamatan sekaligus (butuh kolom kecamatan).
+    - kolom WAJIB: curah hujan (nama kolom fleksibel — "curah_hujan",
+      "curah hujan", "ch", "rr", "rainfall", dst semua dikenali,
+      lihat ALIAS_KOLOM_METEO). Kolom opsional: suhu, kelembaban,
+      kecepatan angin (juga dengan alias fleksibel).
+    - kalau ada beberapa baris per kecamatan (mis. data harian),
+      nilainya dirata-ratakan jadi satu baris per kecamatan.
+Semua file digabung (tanpa fallback ke data simulasi untuk kecamatan
+yang tidak tercakup): dashboard HANYA menampilkan kecamatan yang
+punya DATA KEJADIAN BENCANA *dan* DATA METEOROLOGI sekaligus (irisan
+keduanya) — lihat variabel `kecamatan_aktif`. Kalau tidak ada file
+meteorologi yang diunggah sama sekali, seluruh 40 kecamatan memakai
+data simulasi seperti biasa.
 
 CATATAN PENTING:
     - Koordinat 40 kecamatan (KECAMATAN_BOGOR) adalah APROKSIMASI
@@ -59,8 +75,8 @@ Struktur file:
     2. Data referensi 40 kecamatan Kabupaten Bogor
     3. Parser koordinat & pembangkit data simulasi
     4. Pemuatan data: deteksi format BPBD / format sederhana / simulasi
-       + pemuatan data meteorologi (CSV opsional / simulasi)
-    5. Sidebar: filter kecamatan, jenis bencana, tahun, bulan
+       + pemuatan data meteorologi multi-file (CSV opsional / simulasi)
+    5. Sidebar: unggah file, override kecamatan manual, irisan kecamatan aktif, filter
     5.5 Bar logo (kanan atas, sejajar tab) & peta analisis 2026
     6. Baris KPI ringkasan
     7. Peta sebaran titik kejadian
@@ -427,9 +443,8 @@ def generate_dummy_data(n_rows: int = 220, seed: int = 42) -> pd.DataFrame:
 
 @st.cache_data
 def generate_meteo_data(seed: int = 7) -> pd.DataFrame:
-    """Data meteorologi simulasi per kecamatan. Dipakai sebagai fallback
-    penuh (tanpa CSV) maupun pelengkap kecamatan yang belum ada di CSV
-    yang diunggah — lihat load_meteo_data()."""
+    """Data meteorologi simulasi per kecamatan. Dipakai kalau tidak ada
+    file meteorologi yang diunggah sama sekali (lihat bagian 5)."""
     rng = np.random.default_rng(seed)
     rows = []
     for kec in KECAMATAN_BOGOR:
@@ -454,6 +469,8 @@ def generate_meteo_data(seed: int = 7) -> pd.DataFrame:
 def klasifikasi_curah_hujan(mm_per_hari: float) -> str:
     """Klasifikasi intensitas hujan harian mengikuti kategori BMKG
     (mm/hari): ringan 5-20, sedang 20-50, lebat 50-100, sangat lebat >100."""
+    if pd.isna(mm_per_hari):
+        return "Tidak Diketahui"
     if mm_per_hari < 5:
         return "Tidak Hujan/Berawan"
     elif mm_per_hari < 20:
@@ -466,19 +483,48 @@ def klasifikasi_curah_hujan(mm_per_hari: float) -> str:
         return "Sangat Lebat"
 
 
+# --- Pencocokan nama kecamatan (dipakai untuk menebak kecamatan dari nama
+# file meteorologi, dan menormalisasi nilai kolom "kecamatan" di dalam CSV
+# supaya variasi kapitalisasi/spasi tetap cocok dengan daftar resmi) ---
+
+
+def _normalisasi_nama_kecamatan(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(s).strip().lower())
+
+
+_KECAMATAN_NORM_LOOKUP = {_normalisasi_nama_kecamatan(k["n"]): k["n"] for k in KECAMATAN_BOGOR}
+
+
+def cari_kecamatan_dari_nama_file(filename: str):
+    """Menebak nama kecamatan dari nama file (mis. 'cibinong.csv',
+    'data_ch_Cibinong_2026.csv' -> 'Cibinong'). Mengembalikan None kalau
+    tidak ada nama kecamatan yang cocok sebagai bagian dari nama file."""
+    base = re.sub(r"\.csv$", "", filename, flags=re.IGNORECASE)
+    norm = _normalisasi_nama_kecamatan(base)
+    kandidat = [asli for key, asli in _KECAMATAN_NORM_LOOKUP.items() if key and key in norm]
+    if not kandidat:
+        return None
+    # kalau beberapa nama kecamatan cocok sebagai substring, pilih yang
+    # namanya paling panjang (paling spesifik, mengurangi salah tebak
+    # akibat nama kecamatan yang jadi substring nama kecamatan lain)
+    return max(kandidat, key=len)
+
+
 # Alias nama kolom yang diterima untuk CSV data meteorologi, supaya tidak
-# harus mengetik nama kolom persis seperti di kode (mis. "curah hujan" atau
-# "Curah Hujan (mm/hari)" akan tetap dikenali sebagai `curah_hujan_mm_hari`).
+# harus mengetik nama kolom persis seperti di kode (mis. "ch", "curah
+# hujan", "rr", atau "Curah Hujan (mm/hari)" semua dikenali sebagai
+# `curah_hujan_mm_hari`).
 ALIAS_KOLOM_METEO = {
     "kecamatan": {"kecamatan", "kec", "nama_kecamatan"},
     "curah_hujan_mm_hari": {
         "curah_hujan_mm_hari", "curah_hujan", "curah_hujan_mm", "curah_hujan_mmhari",
-        "curahhujan", "hujan", "rainfall", "precipitation",
+        "curahhujan", "hujan", "rainfall", "precipitation", "ch", "rr", "curah",
     },
     "suhu_c": {"suhu_c", "suhu", "temperature", "temp", "suhu_celcius", "suhu_udara"},
-    "kelembaban_persen": {"kelembaban_persen", "kelembaban", "kelembapan", "humidity"},
+    "kelembaban_persen": {"kelembaban_persen", "kelembaban", "kelembapan", "humidity", "rh"},
     "kecepatan_angin_kmh": {
-        "kecepatan_angin_kmh", "kecepatan_angin", "angin", "wind_speed", "windspeed", "kecepatan_angin_km_jam",
+        "kecepatan_angin_kmh", "kecepatan_angin", "angin", "wind_speed", "windspeed",
+        "kecepatan_angin_km_jam", "ws",
     },
 }
 
@@ -506,88 +552,150 @@ def _petakan_kolom_meteo(df_csv: pd.DataFrame) -> pd.DataFrame:
     return df_csv.rename(columns=peta_ganti_nama)
 
 
-def load_meteo_data(uploaded_meteo_file) -> pd.DataFrame:
-    """Titik masuk data meteorologi per kecamatan.
-
-    Kalau ada CSV yang diunggah, kolom WAJIB: `kecamatan`,
-    `curah_hujan_mm_hari`. Kolom OPSIONAL: `suhu_c`, `kelembaban_persen`,
-    `kecepatan_angin_kmh` — diisi kosong (NaN) kalau tidak ada. Kolom
-    `kategori_intensitas` selalu dihitung ulang otomatis dari
-    `curah_hujan_mm_hari` (lihat klasifikasi_curah_hujan()), jadi tidak
-    perlu diisi manual di CSV.
-
-    Kecamatan yang ADA di CSV dipakai apa adanya. Kecamatan yang TIDAK
-    ada di CSV (dari 40 kecamatan Kabupaten Bogor) otomatis diisi dari
-    data simulasi supaya peta & grafik tetap lengkap — bukan berarti
-    datanya asli, jadi kecamatan yang datanya simulasi akan diberi
-    tahu lewat peringatan di sidebar.
-
-    Kalau tidak ada file diunggah, atau format tidak sesuai, dashboard
-    memakai data simulasi sepenuhnya (generate_meteo_data())."""
-    df_simulasi = generate_meteo_data()
-    if uploaded_meteo_file is None:
-        return df_simulasi
-
+def _perlu_pilih_manual_kecamatan(uploaded_file) -> bool:
+    """True kalau file TIDAK punya kolom kecamatan yang dikenali DAN nama
+    kecamatan tidak bisa ditebak dari nama filenya — sehingga perlu
+    dropdown pilihan manual di sidebar."""
+    if cari_kecamatan_dari_nama_file(uploaded_file.name) is not None:
+        return False
     try:
-        df_csv = pd.read_csv(uploaded_meteo_file)
+        uploaded_file.seek(0)
+        preview = pd.read_csv(uploaded_file, nrows=1)
+        preview.columns = [str(c).strip() for c in preview.columns]
+        preview = _petakan_kolom_meteo(preview)
+        return "kecamatan" not in preview.columns
     except Exception:
-        st.sidebar.error("CSV data meteorologi gagal dibaca. Memakai data simulasi.")
-        return df_simulasi
+        return True
+    finally:
+        uploaded_file.seek(0)
+
+
+def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
+    """Membaca & mem-parse satu file CSV meteorologi, lalu mengagregasinya
+    (rata-rata) jadi satu baris per kecamatan. Mengembalikan
+    (DataFrame_teragregasi, None) kalau berhasil, atau (None, pesan_error)
+    kalau gagal — supaya file lain tetap bisa diproses walau satu file
+    bermasalah."""
+    try:
+        uploaded_file.seek(0)
+        df_csv = pd.read_csv(uploaded_file)
+    except Exception:
+        return None, f"File `{uploaded_file.name}` gagal dibaca sebagai CSV."
 
     df_csv.columns = [str(c).strip() for c in df_csv.columns]
     df_csv = _petakan_kolom_meteo(df_csv)
 
-    if not {"kecamatan", "curah_hujan_mm_hari"}.issubset(df_csv.columns):
-        st.sidebar.error(
-            "CSV data meteorologi tidak punya kolom wajib `kecamatan` dan "
-            "`curah_hujan_mm_hari` (atau variasi penulisannya seperti \"curah hujan\"). "
-            "Memakai data simulasi."
+    if "curah_hujan_mm_hari" not in df_csv.columns:
+        return None, (
+            f"File `{uploaded_file.name}` dilewati — tidak ada kolom curah hujan yang "
+            "dikenali (coba beri nama kolom seperti \"curah_hujan\", \"ch\", \"rr\", "
+            "atau \"curah hujan\")."
         )
-        return df_simulasi
 
-    df_csv["kecamatan"] = df_csv["kecamatan"].astype(str).str.strip()
     for kol in ["suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
         if kol not in df_csv.columns:
             df_csv[kol] = np.nan
-    df_csv["curah_hujan_mm_hari"] = pd.to_numeric(df_csv["curah_hujan_mm_hari"], errors="coerce")
-    df_csv = df_csv.dropna(subset=["curah_hujan_mm_hari"])
-    df_csv["kategori_intensitas"] = df_csv["curah_hujan_mm_hari"].apply(klasifikasi_curah_hujan)
+
+    for kol in ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
+        df_csv[kol] = pd.to_numeric(df_csv[kol], errors="coerce")
+
+    if "kecamatan" in df_csv.columns and df_csv["kecamatan"].notna().any():
+        df_csv["kecamatan"] = df_csv["kecamatan"].astype(str).str.strip()
+        # cocokkan tiap nilai ke ejaan resmi 40 kecamatan (case/spasi-insensitive);
+        # kalau tidak cocok, nilai aslinya dipertahankan apa adanya (akan
+        # ditandai "tidak dikenal" di tahap penggabungan)
+        df_csv["kecamatan"] = df_csv["kecamatan"].apply(
+            lambda v: _KECAMATAN_NORM_LOOKUP.get(_normalisasi_nama_kecamatan(v), v)
+        )
+    elif kecamatan_override:
+        df_csv["kecamatan"] = kecamatan_override
+    else:
+        return None, (
+            f"File `{uploaded_file.name}` dilewati — tidak ada kolom kecamatan, dan "
+            "nama kecamatan tidak bisa ditebak dari nama filenya."
+        )
+
+    df_csv = df_csv.dropna(subset=["curah_hujan_mm_hari", "kecamatan"])
+    if df_csv.empty:
+        return None, f"File `{uploaded_file.name}` dilewati — tidak ada baris curah hujan yang valid."
+
+    agg = df_csv.groupby("kecamatan").agg(
+        curah_hujan_mm_hari=("curah_hujan_mm_hari", "mean"),
+        suhu_c=("suhu_c", "mean"),
+        kelembaban_persen=("kelembaban_persen", "mean"),
+        kecepatan_angin_kmh=("kecepatan_angin_kmh", "mean"),
+    ).reset_index()
+    return agg, None
+
+
+def load_meteo_data_multi(uploaded_files, kecamatan_override_map: dict):
+    """Menggabungkan satu atau beberapa file CSV meteorologi TANPA perlu
+    digabung manual jadi satu file dulu: tiap file dibaca & diagregasi
+    terpisah (lihat _baca_satu_file_meteo()), baru hasilnya digabung di
+    sini. Kecamatan yang muncul di lebih dari satu file dirata-ratakan
+    antar file.
+
+    kecamatan_override_map: dict {nama_file: nama_kecamatan_pilihan_manual},
+    dipakai untuk file yang tidak punya kolom kecamatan dan tidak bisa
+    ditebak dari nama filenya (lihat _perlu_pilih_manual_kecamatan()).
+
+    TIDAK melakukan fallback ke data simulasi untuk kecamatan yang tidak
+    tercakup — pembatasan ke kecamatan yang datanya lengkap ditangani di
+    bagian 5 lewat `kecamatan_aktif`.
+
+    Mengembalikan (df_gabungan, daftar_pesan_peringatan)."""
+    semua_hasil = []
+    pesan = []
+    for f in uploaded_files:
+        tebakan = cari_kecamatan_dari_nama_file(f.name)
+        override = kecamatan_override_map.get(f.name) or tebakan
+        hasil, err = _baca_satu_file_meteo(f, kecamatan_override=override)
+        if err:
+            pesan.append(err)
+            continue
+        semua_hasil.append(hasil)
+
+    kolom_kosong = ["kecamatan", "lat", "lon", "curah_hujan_mm_hari", "kategori_intensitas",
+                     "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
+    if not semua_hasil:
+        return pd.DataFrame(columns=kolom_kosong), pesan
+
+    gabungan = pd.concat(semua_hasil, ignore_index=True)
+
+    duplikat = sorted(gabungan["kecamatan"][gabungan["kecamatan"].duplicated()].unique())
+    if duplikat:
+        pesan.append(
+            "Kecamatan berikut muncul di lebih dari satu file meteorologi — nilainya "
+            "dirata-ratakan antar file: " + ", ".join(duplikat)
+        )
+    gabungan = gabungan.groupby("kecamatan", as_index=False).mean(numeric_only=True)
+
+    kecamatan_dikenal = set(_KECAMATAN_NORM_LOOKUP.values())
+    tidak_dikenal = sorted(set(gabungan["kecamatan"]) - kecamatan_dikenal)
+    if tidak_dikenal:
+        pesan.append(
+            "Kecamatan berikut (dari file meteorologi) tidak cocok dengan daftar 40 "
+            "kecamatan Kabupaten Bogor, sehingga diabaikan: " + ", ".join(tidak_dikenal)
+        )
+        gabungan = gabungan[gabungan["kecamatan"].isin(kecamatan_dikenal)]
+
+    if gabungan.empty:
+        return pd.DataFrame(columns=kolom_kosong), pesan
 
     lookup_koordinat = {k["n"]: (k["lat"], k["lon"]) for k in KECAMATAN_BOGOR}
-    df_csv["lat"] = df_csv["kecamatan"].map(lambda k: lookup_koordinat.get(k, (np.nan, np.nan))[0])
-    df_csv["lon"] = df_csv["kecamatan"].map(lambda k: lookup_koordinat.get(k, (np.nan, np.nan))[1])
+    gabungan["lat"] = gabungan["kecamatan"].map(lambda k: lookup_koordinat[k][0])
+    gabungan["lon"] = gabungan["kecamatan"].map(lambda k: lookup_koordinat[k][1])
+    gabungan["kategori_intensitas"] = gabungan["curah_hujan_mm_hari"].apply(klasifikasi_curah_hujan)
 
-    kecamatan_tidak_dikenal = sorted(set(df_csv["kecamatan"]) - set(lookup_koordinat.keys()))
-    if kecamatan_tidak_dikenal:
-        st.sidebar.warning(
-            "Nama kecamatan berikut di CSV meteorologi tidak cocok dengan "
-            "daftar 40 kecamatan Kabupaten Bogor, sehingga diabaikan: "
-            + ", ".join(kecamatan_tidak_dikenal)
-        )
-        df_csv = df_csv[df_csv["kecamatan"].isin(lookup_koordinat.keys())]
-
-    kolom_final = ["kecamatan", "lat", "lon", "curah_hujan_mm_hari", "kategori_intensitas",
-                   "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
-    df_csv = df_csv[kolom_final]
-
-    kecamatan_dari_csv = set(df_csv["kecamatan"])
-    kecamatan_hilang = [k["n"] for k in KECAMATAN_BOGOR if k["n"] not in kecamatan_dari_csv]
-    if kecamatan_hilang:
-        st.sidebar.info(
-            f"{len(kecamatan_hilang)} kecamatan belum ada di CSV meteorologi, "
-            "diisi sementara dari data simulasi: " + ", ".join(kecamatan_hilang)
-        )
-        pelengkap = df_simulasi[df_simulasi["kecamatan"].isin(kecamatan_hilang)][kolom_final]
-        df_final = pd.concat([df_csv, pelengkap], ignore_index=True)
-    else:
-        df_final = df_csv
-
-    return df_final.reset_index(drop=True)
+    return gabungan[kolom_kosong].reset_index(drop=True), pesan
 
 
-def compute_risk_index(df_events: pd.DataFrame, df_meteo: pd.DataFrame) -> pd.DataFrame:
+def compute_risk_index(df_events: pd.DataFrame, df_meteo: pd.DataFrame, daftar_kecamatan) -> pd.DataFrame:
     """Indeks risiko komposit SEDERHANA per kecamatan (0-100): gabungan
     jumlah kejadian, rata-rata keparahan, dan curah hujan rata-rata.
+    Dihitung HANYA untuk `daftar_kecamatan` (kecamatan yang punya data
+    kejadian bencana *dan* data meteorologi — lihat `kecamatan_aktif` di
+    bagian 5), bukan otomatis 40 kecamatan.
     BUKAN metodologi IRBI resmi BNPB — ganti dengan formula kajian
     risiko (bahaya x kerentanan x kapasitas) untuk analisis ilmiah."""
     agg = (
@@ -595,13 +703,13 @@ def compute_risk_index(df_events: pd.DataFrame, df_meteo: pd.DataFrame) -> pd.Da
         .agg(jumlah_kejadian=("kecamatan", "size"), rata_keparahan=("keparahan", "mean"))
         .reset_index()
     )
-    out = pd.DataFrame({"kecamatan": [k["n"] for k in KECAMATAN_BOGOR]})
+    out = pd.DataFrame({"kecamatan": list(daftar_kecamatan)})
     out = out.merge(agg, on="kecamatan", how="left").fillna({"jumlah_kejadian": 0, "rata_keparahan": 0})
     out = out.merge(df_meteo[["kecamatan", "curah_hujan_mm_hari"]], on="kecamatan", how="left")
 
     def norm(s):
         rng_ = s.max() - s.min()
-        return (s - s.min()) / rng_ if rng_ > 0 else s * 0
+        return (s - s.min()) / rng_ if rng_ and rng_ > 0 else s * 0
 
     out["indeks_risiko"] = (
         0.45 * norm(out["jumlah_kejadian"])
@@ -616,7 +724,7 @@ def compute_risk_index(df_events: pd.DataFrame, df_meteo: pd.DataFrame) -> pd.Da
 
 
 # ---------------------------------------------------------------------------
-# 4. PEMUATAN DATA
+# 4. PEMUATAN DATA KEJADIAN BENCANA
 # ---------------------------------------------------------------------------
 
 
@@ -781,7 +889,7 @@ def load_data(uploaded_file) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 5. SIDEBAR: FILTER
+# 5. SIDEBAR: UNGGAH FILE, OVERRIDE KECAMATAN, IRISAN KECAMATAN AKTIF, FILTER
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
@@ -792,22 +900,82 @@ with st.sidebar:
         help="Mendukung format asli laporan BPBD Kabupaten Bogor (terdeteksi "
         "otomatis) maupun format sederhana. Kosongkan untuk memakai data simulasi.",
     )
-    uploaded_meteo = st.file_uploader(
-        "Unggah CSV data meteorologi per kecamatan (opsional)",
+
+    uploaded_meteo_files = st.file_uploader(
+        "Unggah CSV data meteorologi (boleh lebih dari satu file — satu per kecamatan, atau gabungan)",
         type=["csv"],
-        help="Kolom wajib: kecamatan, curah hujan (nama kolom fleksibel, "
-        "misal \"curah_hujan_mm_hari\" atau \"Curah Hujan (mm/hari)\" sama-sama "
-        "dikenali). Kolom opsional: suhu, kelembaban, kecepatan angin. "
-        "Kecamatan yang tidak ada di CSV akan diisi sementara dari data simulasi.",
+        accept_multiple_files=True,
+        help=(
+            "Bisa unggah beberapa file sekaligus tanpa perlu digabung manual. Tiap file "
+            "boleh berisi satu kecamatan (nama kecamatan dikenali dari nama filenya, "
+            "mis. \"cibinong.csv\", atau dari kolom kecamatan di dalam file) atau "
+            "beberapa kecamatan sekaligus (butuh kolom kecamatan). Nama kolom fleksibel: "
+            "\"curah hujan\", \"ch\", \"rr\", \"curah_hujan_mm_hari\" semua dikenali. "
+            "Kecamatan yang tidak tercakup di data meteorologi tidak akan tampil di dashboard."
+        ),
     )
+
+    kecamatan_override_map = {}
+    if uploaded_meteo_files:
+        file_perlu_override = [f for f in uploaded_meteo_files if _perlu_pilih_manual_kecamatan(f)]
+        if file_perlu_override:
+            st.caption("Nama kecamatan tidak terbaca otomatis untuk file berikut — pilih manual:")
+            for f in file_perlu_override:
+                pilihan = st.selectbox(
+                    f"Kecamatan untuk `{f.name}`",
+                    [k["n"] for k in KECAMATAN_BOGOR],
+                    key=f"override_kec_{f.name}",
+                )
+                kecamatan_override_map[f.name] = pilihan
 
     st.markdown("---")
     st.markdown("### Filter")
 
     df_all = load_data(uploaded)
-    df_meteo = load_meteo_data(uploaded_meteo)
 
-    tahun_opsi = sorted(df_all["tanggal"].dt.year.unique(), reverse=True)
+    if uploaded_meteo_files:
+        df_meteo_real, pesan_meteo = load_meteo_data_multi(uploaded_meteo_files, kecamatan_override_map)
+        for p in pesan_meteo:
+            st.warning(p)
+        if df_meteo_real.empty:
+            st.error(
+                "Tidak ada data meteorologi valid yang bisa dipakai dari file yang "
+                "diunggah. Memakai data simulasi penuh untuk 40 kecamatan."
+            )
+            df_meteo = generate_meteo_data()
+            meteo_dari_file = False
+        else:
+            df_meteo = df_meteo_real
+            meteo_dari_file = True
+    else:
+        df_meteo = generate_meteo_data()
+        meteo_dari_file = False
+
+    # --- irisan kecamatan: hanya tampilkan kecamatan yang punya data
+    # kejadian bencana DAN data meteorologi sekaligus ---
+    kecamatan_bencana_set = set(df_all["kecamatan"].unique())
+    kecamatan_meteo_set = set(df_meteo["kecamatan"].unique())
+    kecamatan_aktif = sorted(kecamatan_bencana_set & kecamatan_meteo_set)
+
+    if meteo_dari_file:
+        hanya_bencana = sorted(kecamatan_bencana_set - kecamatan_meteo_set)
+        hanya_meteo = sorted(kecamatan_meteo_set - kecamatan_bencana_set)
+        if hanya_bencana:
+            st.info(
+                f"{len(hanya_bencana)} kecamatan punya data kejadian bencana tapi belum "
+                "ada data meteorologinya, sehingga tidak ditampilkan: " + ", ".join(hanya_bencana)
+            )
+        if hanya_meteo:
+            st.info(
+                f"{len(hanya_meteo)} kecamatan di data meteorologi tidak punya data "
+                "kejadian bencana yang cocok, sehingga tidak ditampilkan: " + ", ".join(hanya_meteo)
+            )
+        st.caption(f"✅ {len(kecamatan_aktif)} kecamatan aktif: data lengkap (bencana + meteorologi).")
+
+    df_all = df_all[df_all["kecamatan"].isin(kecamatan_aktif)].reset_index(drop=True)
+    df_meteo = df_meteo[df_meteo["kecamatan"].isin(kecamatan_aktif)].reset_index(drop=True)
+
+    tahun_opsi = sorted(df_all["tanggal"].dt.year.unique(), reverse=True) if not df_all.empty else []
     tahun_pilih = st.multiselect("Tahun", tahun_opsi, default=tahun_opsi)
 
     NAMA_BULAN = {
@@ -840,13 +1008,22 @@ with st.sidebar:
         "University. Cakupan: Kabupaten Bogor."
     )
 
+if not kecamatan_aktif:
+    st.error(
+        "Tidak ada kecamatan yang punya data kejadian bencana DAN data meteorologi "
+        "sekaligus, sehingga dashboard tidak bisa ditampilkan. Periksa kecocokan nama "
+        "kecamatan antara file kejadian bencana dan file meteorologi di sidebar "
+        "(atau kosongkan salah satunya untuk memakai data simulasi)."
+    )
+    st.stop()
+
 df = df_all[df_all["tanggal"].dt.year.isin(tahun_pilih) & df_all["jenis_bencana"].isin(jenis_pilih)]
 if bulan_pilih_angka:
     df = df[df["tanggal"].dt.month.isin(bulan_pilih_angka)]
 if kecamatan_pilih:
     df = df[df["kecamatan"].isin(kecamatan_pilih)]
 
-df_risk = compute_risk_index(df, df_meteo)
+df_risk = compute_risk_index(df, df_meteo, kecamatan_aktif)
 
 
 # ---------------------------------------------------------------------------
@@ -929,16 +1106,24 @@ with tab_utama:
         "University · cakupan Kabupaten Bogor.</p>",
         unsafe_allow_html=True,
     )
-    if uploaded is None or uploaded_meteo is None:
+    if uploaded is None or not uploaded_meteo_files:
         bagian_kurang = []
         if uploaded is None:
             bagian_kurang.append("kejadian bencana")
-        if uploaded_meteo is None:
+        if not uploaded_meteo_files:
             bagian_kurang.append("meteorologi")
         st.markdown(
             '<div class="proto-note">📌 Data ' + " & ".join(bagian_kurang) + " masih "
             "<b>simulasi</b>. Unggah CSV yang sesuai di sidebar untuk melihat data "
             "sebenarnya.</div>",
+            unsafe_allow_html=True,
+        )
+    elif len(kecamatan_aktif) < len(KECAMATAN_BOGOR):
+        st.markdown(
+            f'<div class="proto-note">📌 Dashboard hanya menampilkan '
+            f"<b>{len(kecamatan_aktif)} dari {len(KECAMATAN_BOGOR)} kecamatan</b> — "
+            "kecamatan lain belum punya data kejadian bencana <i>dan</i> data "
+            "meteorologi sekaligus (lihat catatan di sidebar).</div>",
             unsafe_allow_html=True,
         )
 
@@ -948,7 +1133,7 @@ with tab_utama:
     col3.metric("Korban mengungsi", f"{int(df['mengungsi'].sum()):,}".replace(",", "."))
     col4.metric("Rumah terdampak", f"{int(df['rumah_terdampak'].sum()):,}".replace(",", "."))
     n_tinggi = int((df_risk["kategori_risiko"] == "Tinggi").sum())
-    col5.metric("Kecamatan risiko tinggi", f"{n_tinggi} / {len(KECAMATAN_BOGOR)}")
+    col5.metric("Kecamatan risiko tinggi", f"{n_tinggi} / {len(kecamatan_aktif)}")
 
     st.markdown("---")
 
@@ -1035,7 +1220,8 @@ with tab_utama:
         "Sumbu X: curah hujan rata-rata (mm/hari). Sumbu Y: jumlah kejadian "
         "hidrometeorologi (banjir, tanah longsor, angin kencang, kekeringan). Ukuran "
         "titik: total seluruh jenis kejadian. Warna: kategori indeks risiko komposit "
-        "(lihat catatan di kode, bukan IRBI resmi)."
+        "(lihat catatan di kode, bukan IRBI resmi). Hanya kecamatan dengan data "
+        "lengkap yang dihitung."
     )
 
     hidro_count = (
@@ -1117,7 +1303,7 @@ with tab_utama:
             f"rata-rata pada data saat ini — hubungan {arah} dengan kekuatan **{kekuatan}** "
             f"(patokan kasar: R² < 0,09 sangat lemah, 0,09–0,36 lemah, 0,36–0,64 sedang, > 0,64 kuat). "
             "Ini korelasi sederhana, bukan bukti sebab-akibat, dan sangat dipengaruhi jumlah "
-            "titik data (baru 40 kecamatan)."
+            f"titik data (baru {len(kecamatan_aktif)} kecamatan)."
         )
     else:
         st.caption("R² belum bisa dihitung — data curah hujan tidak bervariasi atau titik data kurang dari 2.")
@@ -1130,8 +1316,8 @@ with tab_utama:
 
     st.markdown("#### Indikator meteorologi")
     st.caption(
-        "Nilai rata-rata seluruh kecamatan."
-        if uploaded_meteo is not None else
+        f"Nilai rata-rata untuk {len(kecamatan_aktif)} kecamatan yang datanya lengkap."
+        if meteo_dari_file else
         "Nilai rata-rata seluruh kecamatan (data simulasi)."
     )
 
@@ -1151,10 +1337,14 @@ with tab_utama:
             color_discrete_map={
                 "Tidak Hujan/Berawan": "#8A96A5", "Ringan": "#3FA79E",
                 "Sedang": "#D9A441", "Lebat": "#E1863C", "Sangat Lebat": "#E8543F",
+                "Tidak Diketahui": "#5E6B7A",
             },
             labels={"curah_hujan_mm_hari": "Curah hujan (mm/hari)", "kecamatan": "", "kategori_intensitas": "Kategori"},
         )
-        fig_meteo.update_layout(height=760, margin=dict(l=10, r=10, t=10, b=10), legend_title_text="")
+        fig_meteo.update_layout(
+            height=max(220, 36 * len(meteo_sorted)),
+            margin=dict(l=10, r=10, t=10, b=10), legend_title_text="",
+        )
         st.plotly_chart(fig_meteo, use_container_width=True)
 
     with tab2:
