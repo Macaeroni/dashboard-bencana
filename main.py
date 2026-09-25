@@ -466,6 +466,46 @@ def klasifikasi_curah_hujan(mm_per_hari: float) -> str:
         return "Sangat Lebat"
 
 
+# Alias nama kolom yang diterima untuk CSV data meteorologi, supaya tidak
+# harus mengetik nama kolom persis seperti di kode (mis. "curah hujan" atau
+# "Curah Hujan (mm/hari)" akan tetap dikenali sebagai `curah_hujan_mm_hari`).
+ALIAS_KOLOM_METEO = {
+    "kecamatan": {"kecamatan", "kec", "nama_kecamatan"},
+    "curah_hujan_mm_hari": {
+        "curah_hujan_mm_hari", "curah_hujan", "curah_hujan_mm", "curah_hujan_mmhari",
+        "curahhujan", "hujan", "rainfall", "precipitation",
+    },
+    "suhu_c": {"suhu_c", "suhu", "temperature", "temp", "suhu_celcius", "suhu_udara"},
+    "kelembaban_persen": {"kelembaban_persen", "kelembaban", "kelembapan", "humidity"},
+    "kecepatan_angin_kmh": {
+        "kecepatan_angin_kmh", "kecepatan_angin", "angin", "wind_speed", "windspeed", "kecepatan_angin_km_jam",
+    },
+}
+
+
+def _normalisasi_nama_kolom(nama: str) -> str:
+    """Menyeragamkan nama kolom supaya bisa dicocokkan ke ALIAS_KOLOM_METEO:
+    huruf kecil, isi dalam kurung dibuang (mis. "(mm/hari)"), spasi/simbol
+    diganti underscore. Contoh: "Curah Hujan (mm/hari)" -> "curah_hujan"."""
+    s = str(nama).strip().lower()
+    s = re.sub(r"\(.*?\)", "", s)
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return s
+
+
+def _petakan_kolom_meteo(df_csv: pd.DataFrame) -> pd.DataFrame:
+    """Mengganti nama kolom CSV meteorologi (apa pun variasi penulisannya)
+    menjadi nama kolom baku yang dipakai kode, berdasarkan ALIAS_KOLOM_METEO."""
+    kolom_ternormalisasi = {_normalisasi_nama_kolom(c): c for c in df_csv.columns}
+    peta_ganti_nama = {}
+    for nama_baku, alias_set in ALIAS_KOLOM_METEO.items():
+        for alias in alias_set:
+            if alias in kolom_ternormalisasi:
+                peta_ganti_nama[kolom_ternormalisasi[alias]] = nama_baku
+                break
+    return df_csv.rename(columns=peta_ganti_nama)
+
+
 def load_meteo_data(uploaded_meteo_file) -> pd.DataFrame:
     """Titik masuk data meteorologi per kecamatan.
 
@@ -495,10 +535,13 @@ def load_meteo_data(uploaded_meteo_file) -> pd.DataFrame:
         return df_simulasi
 
     df_csv.columns = [str(c).strip() for c in df_csv.columns]
+    df_csv = _petakan_kolom_meteo(df_csv)
+
     if not {"kecamatan", "curah_hujan_mm_hari"}.issubset(df_csv.columns):
         st.sidebar.error(
             "CSV data meteorologi tidak punya kolom wajib `kecamatan` dan "
-            "`curah_hujan_mm_hari`. Memakai data simulasi."
+            "`curah_hujan_mm_hari` (atau variasi penulisannya seperti \"curah hujan\"). "
+            "Memakai data simulasi."
         )
         return df_simulasi
 
@@ -752,9 +795,10 @@ with st.sidebar:
     uploaded_meteo = st.file_uploader(
         "Unggah CSV data meteorologi per kecamatan (opsional)",
         type=["csv"],
-        help="Kolom wajib: kecamatan, curah_hujan_mm_hari. Kolom opsional: "
-        "suhu_c, kelembaban_persen, kecepatan_angin_kmh. Kecamatan yang "
-        "tidak ada di CSV akan diisi sementara dari data simulasi.",
+        help="Kolom wajib: kecamatan, curah hujan (nama kolom fleksibel, "
+        "misal \"curah_hujan_mm_hari\" atau \"Curah Hujan (mm/hari)\" sama-sama "
+        "dikenali). Kolom opsional: suhu, kelembaban, kecepatan angin. "
+        "Kecamatan yang tidak ada di CSV akan diisi sementara dari data simulasi.",
     )
 
     st.markdown("---")
