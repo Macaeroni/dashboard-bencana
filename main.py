@@ -785,15 +785,16 @@ def _baca_folder_csv(path_folder: str, sertakan_subfolder: bool = False):
 
 
 # ---------------------------------------------------------------------------
-# KOMPONEN UNGGAH: SATU KOTAK UNTUK FOLDER BERISI CSV *ATAU* FILE CSV
+# KOMPONEN UNGGAH: DUA TOMBOL — "PILIH FILE CSV" DAN "PILIH FOLDER"
 # ---------------------------------------------------------------------------
-# st.file_uploader bawaan Streamlit tidak bisa memilih folder. Karena itu
-# dipakai komponen kecil (HTML+JS, tanpa library tambahan) yang menerima:
-#   - seret folder (subfolder ikut dibaca) atau file CSV ke kotak,
-#   - klik kotak      -> pilih satu/lebih file CSV,
-#   - tautan "pilih folder" -> pilih satu folder.
-# Catatan: dialog pilih file di browser tidak bisa sekaligus memilih file dan
-# folder, jadi ada satu kotak dengan tiga cara masuk (seret / klik / tautan).
+# st.file_uploader bawaan Streamlit tidak bisa memilih folder di semua versi.
+# Karena itu dipakai komponen kecil (HTML+JS, tanpa library tambahan) dengan
+# dua tombol:
+#   - "Pilih file CSV" -> membuka dialog pilih file (satu atau beberapa file
+#                         CSV sekaligus),
+#   - "Pilih folder"   -> membuka dialog pilih folder; semua file .csv di
+#                         dalamnya (termasuk subfolder) ikut terunggah.
+# Tautan kecil "kosongkan" muncul setelah ada file yang terunggah.
 # Berkas komponen ditulis otomatis ke folder sementara saat aplikasi mulai,
 # jadi cukup mengunggah dashboard_bencana.py saat hosting. Kalau gagal dibuat,
 # dashboard otomatis memakai st.file_uploader biasa (multi-file).
@@ -805,43 +806,43 @@ _HTML_KOMPONEN_UNGGAH = r'''<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <style>
-  :root { --teks:#31333F; --latar:#F0F2F6; --garis:#9AA0AD; --aksen:#FF4B4B; }
-  html, body { margin:0; padding:0; background:transparent; font-family:"Source Sans Pro", "Segoe UI", sans-serif; }
-  #zona { box-sizing:border-box; border:1.5px dashed var(--garis); border-radius:10px; padding:14px 10px 10px;
-          text-align:center; color:var(--teks); background:var(--latar); cursor:pointer; }
-  #zona.aktif { border-color:var(--aksen); }
-  #judul { font-size:14px; line-height:1.35; }
-  #judul b { font-weight:600; }
-  #tautan { margin-top:6px; font-size:12.5px; }
+  :root { --teks:#31333F; --latar:#F0F2F6; --garis:rgba(128,128,128,.45); --aksen:#FF4B4B; }
+  html, body { margin:0; padding:0; background:transparent; color:var(--teks);
+               font-family:"Source Sans Pro", "Segoe UI", sans-serif; }
+  [hidden] { display:none !important; }
+  #baris { display:flex; gap:8px; }
+  .tombol { flex:1 1 0; box-sizing:border-box; min-height:38px; padding:6px 10px; font:inherit; font-size:14px;
+            color:var(--teks); background:var(--latar); border:1px solid var(--garis); border-radius:8px;
+            cursor:pointer; white-space:nowrap; }
+  .tombol:hover { border-color:var(--aksen); color:var(--aksen); }
+  .tombol:active { background:var(--aksen); border-color:var(--aksen); color:#fff; }
+  .tombol:focus-visible { outline:2px solid var(--aksen); outline-offset:1px; }
+  #status { margin-top:6px; font-size:12.5px; line-height:1.35; opacity:.85; min-height:16px; }
   .tautan { color:var(--aksen); text-decoration:underline; cursor:pointer; background:none; border:0; padding:0; font:inherit; }
-  #status { margin-top:7px; font-size:12.5px; opacity:.85; min-height:16px; }
 </style>
 </head>
 <body>
-<div id="zona">
-  <div id="judul">Seret <b>folder</b> atau <b>file CSV</b> ke sini,<br>atau klik untuk memilih file CSV</div>
-  <div id="tautan">
-    <button class="tautan" id="bFolder" type="button">pilih folder</button>
-    &nbsp;·&nbsp;
-    <button class="tautan" id="bKosong" type="button">kosongkan</button>
-  </div>
-  <div id="status"></div>
+<div id="baris">
+  <button class="tombol" id="bFile" type="button">📄 Pilih file CSV</button>
+  <button class="tombol" id="bFolder" type="button">📁 Pilih folder</button>
 </div>
+<div id="status"><span id="teksStatus"></span> <button class="tautan" id="bKosong" type="button" hidden>kosongkan</button></div>
 <input id="inFile" type="file" accept=".csv,text/csv" multiple hidden>
 <input id="inFolder" type="file" webkitdirectory hidden>
 <script>
 (function () {
-  var zona = document.getElementById("zona");
-  var elStatus = document.getElementById("status");
+  var elTeks = document.getElementById("teksStatus");
+  var bKosong = document.getElementById("bKosong");
   var inFile = document.getElementById("inFile");
   var inFolder = document.getElementById("inFolder");
+  var jumlahTerkirim = 0;
 
   function kirimKeStreamlit(tipe, data) {
     window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: tipe }, data), "*");
   }
   function setTinggi() { kirimKeStreamlit("streamlit:setFrameHeight", { height: document.body.scrollHeight + 4 }); }
   function setNilai(v) { kirimKeStreamlit("streamlit:setComponentValue", { value: v, dataType: "json" }); }
-  function status(teks) { elStatus.textContent = teks; setTinggi(); }
+  function status(teks) { elTeks.textContent = teks; bKosong.hidden = jumlahTerkirim === 0; setTinggi(); }
   function adalahCsv(nama) { return /\.csv$/i.test(nama); }
 
   function bacaBase64(file) {
@@ -852,71 +853,39 @@ _HTML_KOMPONEN_UNGGAH = r'''<!DOCTYPE html>
       r.readAsDataURL(file);
     });
   }
-  function ambilFile(entry) { return new Promise(function (res, rej) { entry.file(res, rej); }); }
-  function bacaBatch(reader) { return new Promise(function (res, rej) { reader.readEntries(res, rej); }); }
 
-  async function kumpulkan(entry, awalan, hasil) {
-    if (entry.isFile) {
-      var f = await ambilFile(entry);
-      if (adalahCsv(f.name)) hasil.push({ file: f, nama: awalan + f.name });
-    } else if (entry.isDirectory) {
-      var reader = entry.createReader();
-      var batch;
-      do {
-        batch = await bacaBatch(reader);
-        for (var i = 0; i < batch.length; i++) await kumpulkan(batch[i], awalan + entry.name + "/", hasil);
-      } while (batch.length > 0);
+  async function kirim(daftar, asal) {
+    if (!daftar.length) {
+      status(asal === "folder" ? "Tidak ada file .csv di folder itu." : "Tidak ada file .csv yang dipilih.");
+      return;
     }
-  }
-
-  async function kirim(daftar) {
-    if (!daftar.length) { status("Tidak ada file .csv yang ditemukan."); return; }
     status("Membaca " + daftar.length + " file...");
     try {
       var files = [];
       for (var i = 0; i < daftar.length; i++) files.push({ name: daftar[i].nama, data: await bacaBase64(daftar[i].file) });
       setNilai({ files: files, waktu: Date.now() });
-      status(daftar.length + " file CSV terkirim");
+      jumlahTerkirim = files.length;
+      status(files.length + " file CSV terkirim");
     } catch (err) { status("Gagal membaca file: " + err); }
   }
 
-  zona.addEventListener("click", function (e) {
-    if (e.target.closest(".tautan")) return;
-    inFile.click();
-  });
-  document.getElementById("bFolder").addEventListener("click", function (e) { e.stopPropagation(); inFolder.click(); });
-  document.getElementById("bKosong").addEventListener("click", function (e) {
-    e.stopPropagation(); setNilai({ files: [], waktu: Date.now() }); status("Dikosongkan.");
+  document.getElementById("bFile").addEventListener("click", function () { inFile.click(); });
+  document.getElementById("bFolder").addEventListener("click", function () { inFolder.click(); });
+  bKosong.addEventListener("click", function () {
+    setNilai({ files: [], waktu: Date.now() });
+    jumlahTerkirim = 0;
+    status("Dikosongkan.");
   });
 
   inFile.addEventListener("change", function () {
     var d = Array.prototype.slice.call(inFile.files).filter(function (f) { return adalahCsv(f.name); })
       .map(function (f) { return { file: f, nama: f.name }; });
-    inFile.value = ""; kirim(d);
+    inFile.value = ""; kirim(d, "file");
   });
   inFolder.addEventListener("change", function () {
     var d = Array.prototype.slice.call(inFolder.files).filter(function (f) { return adalahCsv(f.name); })
       .map(function (f) { return { file: f, nama: f.webkitRelativePath || f.name }; });
-    inFolder.value = ""; kirim(d);
-  });
-
-  ["dragenter", "dragover"].forEach(function (n) {
-    zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.add("aktif"); });
-  });
-  zona.addEventListener("dragleave", function () { zona.classList.remove("aktif"); });
-  zona.addEventListener("drop", async function (e) {
-    e.preventDefault(); zona.classList.remove("aktif");
-    var items = e.dataTransfer.items, entries = [];
-    if (items && items.length && items[0].webkitGetAsEntry) {
-      // harus dikumpulkan secara sinkron sebelum ada await apa pun
-      for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry(); if (en) entries.push(en); }
-    }
-    var hasil = [];
-    try {
-      if (entries.length) { for (var j = 0; j < entries.length; j++) await kumpulkan(entries[j], "", hasil); }
-      else { Array.prototype.forEach.call(e.dataTransfer.files, function (f) { if (adalahCsv(f.name)) hasil.push({ file: f, nama: f.name }); }); }
-    } catch (err) { status("Gagal membaca folder: " + err); return; }
-    kirim(hasil);
+    inFolder.value = ""; kirim(d, "folder");
   });
 
   window.addEventListener("message", function (e) {
@@ -927,9 +896,6 @@ _HTML_KOMPONEN_UNGGAH = r'''<!DOCTYPE html>
       r.setProperty("--teks", t.textColor); r.setProperty("--latar", t.secondaryBackgroundColor);
       r.setProperty("--aksen", t.primaryColor);
     }
-    var a = e.data.args || {};
-    if (a.judul) document.getElementById("judul").innerHTML =
-      "<b>" + String(a.judul).replace(/</g, "&lt;") + "</b><br>Seret <b>folder</b> atau <b>file CSV</b> ke sini, atau klik untuk memilih file CSV";
     setTinggi();
   });
 
@@ -1013,9 +979,11 @@ def _klik_pilih_folder(kunci: str, judul: str):
 
 
 def widget_sumber_data(kunci: str, judul: str, bantuan: str, contoh_path: str):
-    """Widget sidebar untuk memilih sumber data: unggah file CSV (boleh
-    lebih dari satu) ATAU pilih sebuah folder lewat jendela pilih-folder
-    (path juga bisa diketik/ditempel manual). Mengembalikan daftar
+    """Widget sidebar untuk memilih sumber data: dua tombol — "Pilih file
+    CSV" (satu atau beberapa file) dan "Pilih folder" (semua CSV di dalam
+    folder, termasuk subfolder). Opsional (IZINKAN_PILIH_FOLDER_SERVER),
+    ada juga mode membaca folder di komputer yang menjalankan dashboard,
+    dengan path yang bisa diketik/ditempel manual. Mengembalikan daftar
     (nama_file, file_like); daftar kosong berarti tidak ada sumber."""
     st.markdown(f"**{judul}**")
     if IZINKAN_PILIH_FOLDER_SERVER:
@@ -1026,7 +994,7 @@ def widget_sumber_data(kunci: str, judul: str, bantuan: str, contoh_path: str):
     else:
         mode = "Unggah file CSV"
     if mode == "Unggah file CSV" and _unggah_csv is not None:
-        nilai = _unggah_csv(judul=judul, key=f"komp_{kunci}", default={"files": []})
+        nilai = _unggah_csv(key=f"komp_{kunci}", default={"files": []})
         sumber = _sumber_dari_komponen(nilai)
         if sumber:
             nama = [n for n, _ in sumber]
@@ -1039,8 +1007,7 @@ def widget_sumber_data(kunci: str, judul: str, bantuan: str, contoh_path: str):
         files = st.file_uploader(
             "File CSV", type=["csv"], accept_multiple_files=True,
             key=f"upload_{kunci}", label_visibility="collapsed",
-            help=bantuan + " Bisa memilih banyak file sekaligus, atau menyeret "
-            "sebuah folder berisi CSV ke kotak ini.",
+            help=bantuan + " Bisa memilih banyak file CSV sekaligus.",
         )
         return [(f.name, f) for f in (files or [])]
 
