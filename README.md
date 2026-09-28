@@ -75,6 +75,7 @@ Struktur file:
     10. Indikator meteorologi per kecamatan
     11. Komposisi jenis bencana & ranking kecamatan
     12. Tabel log kejadian terbaru
+    
 ==========================================================================================================================================
 FOLDER PETA ANALISIS
 ==========================================================================================================================================
@@ -104,6 +105,7 @@ Format yang didukung:
 Kalau file untuk satu jenis bencana belum ada, dashboard akan menampilkan
 pesan peringatan (bukan error) yang memberi tahu nama file apa yang masih
 dicari, jadi tab ini tetap aman dibuka meski belum semua peta lengkap.
+
 ==========================================================================================================================================
 FOLDER LOGOS
 ==========================================================================================================================================
