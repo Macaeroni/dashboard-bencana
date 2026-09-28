@@ -2,6 +2,8 @@ import base64
 import io
 import re
 import os
+import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
@@ -776,13 +778,50 @@ def _baca_folder_csv(path_folder: str, sertakan_subfolder: bool = False):
     return sumber, None
 
 
+def _pilih_folder_dialog(judul: str = "Pilih folder"):
+    """Membuka jendela pilih-folder bawaan sistem operasi (lewat tkinter,
+    dijalankan di proses terpisah supaya aman dari Streamlit).
+    Mengembalikan path folder, "" kalau dibatalkan, atau None kalau
+    jendelanya tidak bisa dibuka (mis. dashboard berjalan di server
+    tanpa layar). Ini bekerja karena dashboard dijalankan di komputer
+    pengguna sendiri; pada versi yang di-hosting online, jendela ini
+    akan muncul di server, bukan di komputer pengguna."""
+    kode = (
+        "import tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "r = tk.Tk(); r.withdraw(); r.attributes('-topmost', True)\n"
+        f"print(filedialog.askdirectory(title={judul!r}))\n"
+    )
+    try:
+        hasil = subprocess.run(
+            [sys.executable, "-c", kode], capture_output=True, text=True, timeout=300
+        )
+    except Exception:
+        return None
+    if hasil.returncode != 0:
+        return None
+    return hasil.stdout.strip()
+
+
+def _klik_pilih_folder(kunci: str, judul: str):
+    """Callback tombol "Pilih folder...": isi kolom path dari jendela pilih-folder."""
+    path = _pilih_folder_dialog(f"Pilih folder: {judul}")
+    if path is None:
+        st.session_state[f"galat_dialog_{kunci}"] = True
+    else:
+        st.session_state[f"galat_dialog_{kunci}"] = False
+        if path:  # "" berarti dibatalkan -> biarkan path lama
+            st.session_state[f"folder_{kunci}"] = os.path.normpath(path)
+
+
 def widget_sumber_data(kunci: str, judul: str, bantuan: str, contoh_path: str):
     """Widget sidebar untuk memilih sumber data: unggah file CSV (boleh
-    lebih dari satu) ATAU baca semua CSV dari sebuah folder. Mengembalikan
-    daftar (nama_file, file_like); daftar kosong berarti tidak ada sumber."""
+    lebih dari satu) ATAU pilih sebuah folder lewat jendela pilih-folder
+    (path juga bisa diketik/ditempel manual). Mengembalikan daftar
+    (nama_file, file_like); daftar kosong berarti tidak ada sumber."""
     st.markdown(f"**{judul}**")
     mode = st.radio(
-        "Sumber data", ["Unggah file CSV", "Baca dari folder"],
+        "Sumber data", ["Unggah file CSV", "Pilih folder"],
         horizontal=True, key=f"mode_{kunci}", label_visibility="collapsed",
     )
     if mode == "Unggah file CSV":
@@ -792,10 +831,20 @@ def widget_sumber_data(kunci: str, judul: str, bantuan: str, contoh_path: str):
         )
         return [(f.name, f) for f in (files or [])]
 
+    st.button(
+        "Pilih folder...", key=f"btn_{kunci}", on_click=_klik_pilih_folder,
+        args=(kunci, judul), use_container_width=True,
+        help="Membuka jendela untuk memilih folder berisi file CSV. " + bantuan,
+    )
+    if st.session_state.get(f"galat_dialog_{kunci}"):
+        st.warning(
+            "Jendela pilih folder tidak bisa dibuka di sini (mis. dashboard "
+            "berjalan di server). Ketik path folder secara manual di bawah, "
+            "atau pakai opsi Unggah file CSV."
+        )
     path = st.text_input(
-        "Path folder", key=f"folder_{kunci}", placeholder=contoh_path,
-        help="Tempel alamat folder berisi file CSV (boleh lebih dari satu file). "
-        + bantuan,
+        "Folder terpilih (bisa juga diketik/ditempel)", key=f"folder_{kunci}",
+        placeholder=contoh_path,
     )
     sub = st.checkbox("Sertakan subfolder", key=f"sub_{kunci}")
     sumber, pesan = _baca_folder_csv(path, sub)
