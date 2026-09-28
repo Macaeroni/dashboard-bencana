@@ -10,8 +10,23 @@ Cara menjalankan:
     pip install streamlit pandas numpy plotly
     streamlit run main.py
 
+HALAMAN
+-------
+    Home              : latar belakang, tujuan, fitur, cara pakai, sumber data
+                        & metode, FAQ, batasan, tentang penyusun
+                        (lihat halaman_home()).
+    Dashboard Utama   : KPI, peta sebaran, tren, korelasi meteorologi, dst.
+    Peta Analisis 2026: peta hasil analisis per jenis bencana.
+
 FORMAT CSV YANG DIDUKUNG (DATA KEJADIAN BENCANA)
 --------------------------------------------------
+Sama seperti data meteorologi, data kejadian bencana bisa diunggah
+sebagai SATU FILE, BEBERAPA FILE CSV sekaligus (mis. satu file per
+bulan), ATAU SATU FOLDER berisi banyak CSV. Semua file yang formatnya
+dikenali digabung; file yang tidak dikenali dilewati dengan pesan di
+sidebar. `keparahan` dihitung dengan skala gabungan seluruh file
+(bukan per file), supaya angkanya konsisten antar-bulan.
+
 1. Format asli laporan BPBD Kabupaten Bogor (terdeteksi otomatis),
    dengan ciri: ada baris judul di atas, lalu header berisi kolom
    seperti KECAMATAN, TANGGAL KEJADIAN, LONGITUDE, LATITUDE, dan 8
@@ -78,9 +93,10 @@ Struktur file:
     2. Data referensi 40 kecamatan Kabupaten Bogor
     3. Parser koordinat & pembangkit data simulasi
     4. Pemuatan data: deteksi format BPBD / format sederhana / simulasi
-       + pemuatan data meteorologi multi-file (CSV opsional / simulasi)
-    5. Sidebar: unggah file, override kecamatan manual, irisan kecamatan aktif, filter
-    5.5 Bar logo (kanan atas, sejajar tab) & peta analisis 2026
+       (multi-file) + pemuatan data meteorologi multi-file
+    5. Sidebar: unggah file (bencana & meteorologi: file atau folder),
+       override kecamatan manual, irisan kecamatan aktif, filter
+    5.5 Bar logo (kanan atas, sejajar tab), halaman Home, peta analisis 2026
     6. Baris KPI ringkasan
     7. Peta sebaran titik kejadian
     8. Tren bulanan per jenis bencana
@@ -197,6 +213,13 @@ div[data-testid="stMetricLabel"] div {
     text-overflow: clip !important;
     line-height: 1.25;
 }
+div[data-testid="stMetricValue"],
+div[data-testid="stMetricValue"] div {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.2;
+}
 h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
 .dash-caption { color: rgba(127,127,127,0.9); font-size: 0.85rem; margin-top: -8px; }
 .proto-note {
@@ -207,6 +230,24 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
     opacity: 0.85;
     margin-bottom: 1rem;
 }
+
+/* Halaman Home */
+.hero {
+    border: 1px solid rgba(127,127,127,0.22);
+    border-radius: 14px;
+    padding: 30px 32px 26px;
+    margin: 0.4rem 0 1.6rem;
+    background: linear-gradient(135deg, rgba(63,167,158,0.14), rgba(232,84,63,0.07));
+}
+.hero-kicker { font-size: 0.85rem; opacity: 0.75; margin-bottom: 6px; }
+.hero-title { font-size: 2.1rem; font-weight: 600; line-height: 1.2; margin-bottom: 10px; }
+.hero-sub { font-size: 1.02rem; opacity: 0.85; max-width: 62ch; line-height: 1.55; }
+.hero-chips { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+.hero-chips span {
+    font-size: 0.8rem; padding: 4px 11px; border-radius: 999px;
+    border: 1px solid rgba(127,127,127,0.32);
+}
+.home-footer { text-align: center; opacity: 0.65; font-size: 0.8rem; padding: 6px 0 2px; }
 
 /* Layar kecil (HP): logo di baris sendiri, tab turun di bawahnya */
 @media (max-width: 768px) {
@@ -234,6 +275,8 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
     [data-testid="stTabs"] [data-testid="stTabs"] > [data-baseweb="tab-list"] {
         margin-top: 0;
     }
+    .hero { padding: 20px 18px 18px; }
+    .hero-title { font-size: 1.5rem; }
 }
 
 </style>
@@ -786,7 +829,11 @@ def _cari_baris_header(uploaded_file):
 def _parse_format_bpbd(uploaded_file):
     """Mem-parse CSV format asli BPBD Kabupaten Bogor. Mengembalikan
     None kalau file tidak cocok format ini (supaya load_data() bisa
-    mencoba format lain)."""
+    mencoba format lain).
+
+    Hasilnya membawa kolom bantu `_dampak_score` (skor dampak mentah)
+    supaya load_data() bisa menghitung ulang `keparahan` dengan skala
+    gabungan kalau ada lebih dari satu file."""
     header_idx = _cari_baris_header(uploaded_file)
     if header_idx is None:
         return None
@@ -878,6 +925,7 @@ def _parse_format_bpbd(uploaded_file):
             "rumah_terdampak": rumah_terdampak.astype(int),
             "keparahan": keparahan.round(1),
             "status": status,
+            "_dampak_score": dampak_score,
         }
     )
     hasil = hasil.dropna(subset=["tanggal", "kecamatan"])
@@ -906,33 +954,77 @@ def _parse_format_sederhana(uploaded_file):
     return df_csv
 
 
-def load_data(uploaded_file) -> pd.DataFrame:
-    """Titik masuk data kejadian bencana:
-    1) coba parse sebagai format asli BPBD Kabupaten Bogor,
-    2) kalau gagal, coba format sederhana,
-    3) kalau keduanya gagal atau tidak ada file, pakai data simulasi."""
-    if uploaded_file is None:
+def load_data(uploaded_files) -> pd.DataFrame:
+    """Titik masuk data kejadian bencana. `uploaded_files` adalah daftar
+    file CSV (boleh kosong, satu file, banyak file, atau isi satu folder).
+    Tiap file:
+    1) dicoba sebagai format asli BPBD Kabupaten Bogor,
+    2) kalau gagal, dicoba sebagai format sederhana,
+    3) kalau keduanya gagal, dilewati (dengan pesan di sidebar).
+    Semua file yang berhasil dibaca digabung jadi satu tabel. Untuk data
+    format BPBD, `keparahan` dihitung ulang dengan skala GABUNGAN seluruh
+    file, supaya nilainya sebanding antar-file (mis. antar-bulan).
+    Kalau tidak ada file, atau tidak satu pun dikenali, dashboard memakai
+    data simulasi."""
+    if not uploaded_files:
         return generate_dummy_data()
 
-    hasil = _parse_format_bpbd(uploaded_file)
-    if hasil is not None and len(hasil) > 0:
-        return hasil
+    bagian = []
+    dilewati = []
+    for f in uploaded_files:
+        hasil = None
+        try:
+            hasil = _parse_format_bpbd(f)
+            if hasil is None or len(hasil) == 0:
+                hasil = _parse_format_sederhana(f)
+        except Exception:
+            hasil = None
+        if hasil is None or len(hasil) == 0:
+            dilewati.append(f.name)
+            continue
+        bagian.append(hasil)
 
-    hasil = _parse_format_sederhana(uploaded_file)
-    if hasil is not None and len(hasil) > 0:
-        return hasil
+    if dilewati:
+        st.sidebar.warning(
+            "File kejadian bencana berikut formatnya tidak dikenali sehingga dilewati: "
+            + ", ".join(dilewati)
+        )
+    if not bagian:
+        st.sidebar.error(
+            "Tidak ada file kejadian bencana yang formatnya dikenali. Pastikan file "
+            "memakai format laporan BPBD Kabupaten Bogor, atau skema sederhana (kolom "
+            "tanggal, jenis_bencana, kecamatan). Menampilkan data simulasi sementara."
+        )
+        return generate_dummy_data()
 
-    st.sidebar.error(
-        "Format CSV tidak dikenali. Pastikan file memakai format laporan "
-        "BPBD Kabupaten Bogor, atau skema sederhana (kolom tanggal, "
-        "jenis_bencana, kecamatan). Menampilkan data simulasi sementara."
-    )
-    return generate_dummy_data()
+    gabungan = pd.concat(bagian, ignore_index=True)
+
+    if "_dampak_score" in gabungan.columns:
+        skor = gabungan["_dampak_score"]
+        ada = skor.notna()
+        if ada.any():
+            maks = skor[ada].max()
+            if maks > 0:
+                gabungan.loc[ada, "keparahan"] = (
+                    (1 + 4 * np.log1p(skor[ada]) / np.log1p(maks)).clip(1, 5).round(1)
+                )
+            else:
+                gabungan.loc[ada, "keparahan"] = 1.0
+        gabungan = gabungan.drop(columns=["_dampak_score"])
+
+    return gabungan.sort_values("tanggal", ascending=False).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
 # 5. SIDEBAR: UNGGAH FILE, OVERRIDE KECAMATAN, IRISAN KECAMATAN AKTIF, FILTER
 # ---------------------------------------------------------------------------
+
+BANTUAN_BENCANA = (
+    "Mendukung format asli laporan BPBD Kabupaten Bogor (terdeteksi otomatis) maupun "
+    "format sederhana (kolom tanggal, jenis_bencana, kecamatan). Boleh lebih dari satu "
+    "file (mis. satu file per bulan) — semuanya digabung. Kosongkan untuk memakai "
+    "data simulasi."
+)
 
 BANTUAN_METEO = (
     "Tiap file boleh berisi satu kecamatan (nama kecamatan dikenali dari nama "
@@ -944,54 +1036,80 @@ BANTUAN_METEO = (
     "tidak akan tampil di dashboard."
 )
 
-with st.sidebar:
-    st.markdown("### Pengaturan Data")
-    uploaded = st.file_uploader(
-        "Unggah CSV data kejadian bencana (opsional)",
-        type=["csv"],
-        help="Mendukung format asli laporan BPBD Kabupaten Bogor (terdeteksi "
-        "otomatis) maupun format sederhana. Kosongkan untuk memakai data simulasi.",
-    )
 
-    # Data meteorologi: pilih file CSV (satu/banyak sekaligus) ATAU satu folder.
-    # Mode "directory" pada st.file_uploader membuka dialog pilih-folder dan hanya
-    # bisa memilih folder (bukan file satuan), makanya dibuat dua mode terpisah.
-    mode_meteo = st.radio(
-        "Cara unggah data meteorologi",
+def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadangan, bantuan):
+    """Widget sidebar untuk mengunggah data CSV dengan DUA pilihan cara:
+    'Pilih file CSV' (satu atau banyak file sekaligus) atau 'Pilih folder'
+    (semua CSV di dalam satu folder). Dipakai sama persis untuk data
+    kejadian bencana dan data meteorologi.
+
+    Mode "directory" pada st.file_uploader membuka dialog pilih-folder dan
+    hanya bisa memilih folder (bukan file satuan), makanya dibuat dua mode
+    terpisah lewat radio. Mengembalikan daftar file (kosong kalau belum
+    ada yang diunggah)."""
+    mode = st.radio(
+        label_mode,
         ["Pilih file CSV", "Pilih folder"],
         horizontal=True,
-        key="mode_unggah_meteo",
+        key=f"mode_unggah_{kunci}",
     )
-    if mode_meteo == "Pilih folder":
+    if mode == "Pilih folder":
         try:
-            uploaded_meteo_files = st.file_uploader(
-                "Unggah folder berisi CSV data meteorologi (satu per kecamatan, atau gabungan)",
+            files = st.file_uploader(
+                label_folder,
                 type=["csv"],
                 accept_multiple_files="directory",
-                key="meteo_folder",
-                help="Pilih SATU FOLDER; semua file CSV di dalamnya ikut terunggah. " + BANTUAN_METEO,
+                key=f"{kunci}_folder",
+                help="Pilih SATU FOLDER; semua file CSV di dalamnya ikut terunggah. " + bantuan,
             )
         except Exception:
             st.warning(
                 "Versi Streamlit ini belum mendukung unggah folder. Pilih beberapa "
                 "file CSV sekaligus di bawah ini."
             )
-            uploaded_meteo_files = st.file_uploader(
-                "Unggah CSV data meteorologi (boleh lebih dari satu file)",
+            files = st.file_uploader(
+                label_cadangan,
                 type=["csv"],
                 accept_multiple_files=True,
-                key="meteo_file_cadangan",
-                help=BANTUAN_METEO,
+                key=f"{kunci}_file_cadangan",
+                help=bantuan,
             )
     else:
-        uploaded_meteo_files = st.file_uploader(
-            "Unggah CSV data meteorologi (boleh lebih dari satu file — satu per kecamatan, atau gabungan)",
+        files = st.file_uploader(
+            label_file,
             type=["csv"],
             accept_multiple_files=True,
-            key="meteo_file",
-            help=BANTUAN_METEO,
+            key=f"{kunci}_file",
+            help=bantuan,
         )
-    uploaded_meteo_files = uploaded_meteo_files or []
+    return files or []
+
+
+with st.sidebar:
+    st.markdown("### Pengaturan Data")
+
+    uploaded_bencana_files = widget_unggah_csv(
+        "bencana",
+        label_mode="Cara unggah data kejadian bencana",
+        label_file="Unggah CSV data kejadian bencana (boleh lebih dari satu file — mis. satu per bulan)",
+        label_folder="Unggah folder berisi CSV data kejadian bencana",
+        label_cadangan="Unggah CSV data kejadian bencana (boleh lebih dari satu file)",
+        bantuan=BANTUAN_BENCANA,
+    )
+
+    st.markdown("---")
+
+    uploaded_meteo_files = widget_unggah_csv(
+        "meteo",
+        label_mode="Cara unggah data meteorologi",
+        label_file="Unggah CSV data meteorologi (boleh lebih dari satu file — satu per kecamatan, atau gabungan)",
+        label_folder="Unggah folder berisi CSV data meteorologi (satu per kecamatan, atau gabungan)",
+        label_cadangan="Unggah CSV data meteorologi (boleh lebih dari satu file)",
+        bantuan=BANTUAN_METEO,
+    )
+
+    ada_data_bencana = len(uploaded_bencana_files) > 0
+    ada_data_meteo = len(uploaded_meteo_files) > 0
 
     kecamatan_override_map = {}
     if uploaded_meteo_files:
@@ -1009,7 +1127,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Filter")
 
-    df_all = load_data(uploaded)
+    df_all = load_data(uploaded_bencana_files)
 
     if uploaded_meteo_files:
         df_meteo_real, pesan_meteo = load_meteo_data_multi(uploaded_meteo_files, kecamatan_override_map)
@@ -1105,7 +1223,7 @@ df_risk = compute_risk_index(df, df_meteo, kecamatan_aktif)
 
 
 # ---------------------------------------------------------------------------
-# 5.5 BAR LOGO (kanan atas, sejajar tab) & PETA HASIL ANALISIS BENCANA 2026
+# 5.5 BAR LOGO (kanan atas, sejajar tab), HALAMAN HOME & PETA ANALISIS 2026
 # ---------------------------------------------------------------------------
 
 
@@ -1137,6 +1255,199 @@ def html_logo_bar() -> str:
 _logo_html = html_logo_bar()
 if _logo_html:
     st.markdown(_logo_html, unsafe_allow_html=True)
+
+
+# --- Isi yang bisa kamu ubah sendiri untuk halaman Home ---
+TIM_PENYUSUN = []  # isi nama penyusun, mis. ["Nama Lengkap 1", "Nama Lengkap 2"]; kosong = bagian ini disembunyikan
+KONTAK_EMAIL = ""  # opsional, mis. "nama@email.com"; kosong = tidak ditampilkan
+
+
+def halaman_home(df_data, kecamatan_aktif, ada_data_bencana, ada_data_meteo):
+    """Halaman beranda: pengantar, latar belakang, tujuan, fitur, cara
+    pakai, sekilas data, sumber data & metode, FAQ, batasan, dan tentang
+    penyusun. Teksnya sengaja dibuat sederhana dan mudah diubah."""
+    bulan_singkat = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+    # --- Hero ---
+    st.markdown(
+        f"""
+<div class="hero">
+  <div class="hero-kicker">Departemen Geofisika dan Meteorologi · IPB University</div>
+  <div class="hero-title">Dashboard Pemantauan Bencana<br>Kabupaten Bogor</div>
+  <div class="hero-sub">Menghubungkan data kejadian bencana dengan kondisi meteorologi
+  per kecamatan, untuk membantu melihat di mana bencana sering terjadi dan
+  kaitannya dengan kondisi cuaca.</div>
+  <div class="hero-chips">
+    <span>{len(KECAMATAN_BOGOR)} kecamatan</span>
+    <span>{len(TYPE_COLUMN_MAP)} jenis bencana</span>
+    <span>Peta analisis 2026</span>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Gunakan menu di sidebar untuk mengunggah data dan mengatur filter, lalu buka tab **Dashboard Utama** atau **Peta Analisis 2026**.")
+
+    # --- Latar belakang ---
+    st.markdown("### Latar belakang")
+    kiri, kanan = st.columns([1.4, 1])
+    with kiri:
+        st.markdown(
+            """
+Kabupaten Bogor terdiri dari 40 kecamatan dengan kondisi wilayah yang beragam,
+dari dataran rendah di utara hingga kawasan pegunungan di selatan, dan dikenal
+memiliki curah hujan yang tinggi. Kondisi ini membuat wilayahnya rentan
+terhadap berbagai bencana, terutama bencana hidrometeorologi seperti banjir,
+tanah longsor, angin kencang, dan kekeringan.
+
+Cuaca dan iklim sangat memengaruhi terjadinya bencana-bencana tersebut.
+Parameter seperti curah hujan, kelembapan, suhu udara, dan kecepatan angin
+dapat memicu atau memperparah kejadian bencana. Karena itu, memahami hubungan
+antara kondisi meteorologi dan kejadian bencana penting untuk mengenali potensi
+bencana lebih awal dan merencanakan mitigasi.
+
+Dashboard ini dikembangkan oleh mahasiswa Departemen Geofisika dan Meteorologi
+IPB University sebagai prototipe alat bantu untuk memantau dan menganalisis
+kejadian bencana di Kabupaten Bogor secara lebih mudah dan berbasis data.
+"""
+        )
+    with kanan:
+        with st.container(border=True):
+            st.markdown("**Tujuan**")
+            st.markdown(
+                "- Menampilkan sebaran kejadian bencana per jenis, waktu, dan kecamatan.\n"
+                "- Memperlihatkan kaitan curah hujan dengan kejadian bencana hidrometeorologi.\n"
+                "- Menyajikan indeks risiko sederhana untuk membandingkan antar-kecamatan.\n"
+                "- Menyediakan peta hasil analisis bencana tahun 2026 per jenis bencana."
+            )
+
+    # --- Fitur ---
+    st.markdown("### Yang bisa dilihat di dashboard")
+    fitur = [
+        ("Sebaran kejadian", "Peta titik kejadian per jenis bencana, dengan ukuran titik sesuai indeks keparahan."),
+        ("Tren & komposisi", "Jumlah kejadian per bulan, komposisi jenis bencana, dan kecamatan dengan kejadian terbanyak."),
+        ("Korelasi meteorologi", "Hubungan curah hujan dengan kejadian hidrometeorologi, lengkap dengan garis regresi dan R²."),
+        ("Peta analisis 2026", "Peta hasil analisis yang sudah disiapkan terpisah, dipilih per jenis bencana."),
+    ]
+    for kolom, (judul, isi) in zip(st.columns(len(fitur)), fitur):
+        with kolom:
+            with st.container(border=True):
+                st.markdown(f"**{judul}**")
+                st.caption(isi)
+
+    # --- Cara menggunakan ---
+    st.markdown("### Cara menggunakan")
+    st.markdown(
+        """
+1. **Siapkan data.** Di sidebar, unggah CSV kejadian bencana (format laporan BPBD Kabupaten Bogor)
+   dan CSV meteorologi. Bisa satu file, beberapa file, atau satu folder. Tanpa unggahan, dashboard
+   menampilkan data simulasi sebagai contoh.
+2. **Atur filter.** Pilih tahun, bulan, jenis bencana, dan kecamatan di sidebar.
+3. **Baca hasilnya.** Buka tab **Dashboard Utama** untuk peta, tren, korelasi, dan indikator meteorologi.
+4. **Lihat peta analisis.** Buka tab **Peta Analisis 2026** dan pilih jenis bencananya.
+"""
+    )
+
+    # --- Sekilas data ---
+    st.markdown("### Sekilas data")
+    if ada_data_bencana:
+        st.caption("Ringkasan seluruh periode dari file kejadian bencana yang diunggah (hanya kecamatan yang datanya lengkap).")
+    else:
+        st.caption("Ringkasan data simulasi (contoh). Unggah CSV kejadian bencana di sidebar untuk melihat data sebenarnya.")
+    if len(df_data) > 0:
+        tgl_min, tgl_max = df_data["tanggal"].min(), df_data["tanggal"].max()
+        periode = f"{bulan_singkat[tgl_min.month - 1]} {tgl_min.year} – {bulan_singkat[tgl_max.month - 1]} {tgl_max.year}"
+        jenis_top = df_data["jenis_bencana"].value_counts().idxmax()
+        kec_top = df_data["kecamatan"].value_counts().idxmax()
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Total kejadian", f"{len(df_data):,}".replace(",", "."))
+        s2.metric("Jenis terbanyak", jenis_top)
+        s3.metric("Kecamatan terbanyak", kec_top)
+        s4.metric("Periode data", periode)
+
+    # --- Sumber data & metode ---
+    st.markdown("### Sumber data dan metode")
+    m1, m2 = st.columns(2)
+    with m1:
+        with st.container(border=True):
+            st.markdown("**Data yang dipakai**")
+            st.markdown(
+                "- **Kejadian bencana:** laporan kejadian bencana BPBD Kabupaten Bogor "
+                "(jenis, waktu, lokasi, korban, dan rumah terdampak).\n"
+                "- **Meteorologi:** curah hujan, suhu, kelembapan, dan kecepatan angin per kecamatan "
+                "(diunggah pengguna; tanpa unggahan dipakai data simulasi).\n"
+                "- **Peta analisis 2026:** hasil analisis terpisah per jenis bencana."
+            )
+    with m2:
+        with st.container(border=True):
+            st.markdown("**Cara perhitungan**")
+            st.markdown(
+                "- **Intensitas hujan:** klasifikasi harian BMKG (ringan 5–20, sedang 20–50, "
+                "lebat 50–100, sangat lebat di atas 100 mm/hari).\n"
+                "- **Keparahan (1–5):** proksi dari korban jiwa, luka, rumah rusak, rumah terdampak, "
+                "dan jumlah pengungsi.\n"
+                "- **Indeks risiko (0–100):** gabungan jumlah kejadian (45%), rata-rata keparahan (30%), "
+                "dan curah hujan (25%)."
+            )
+
+    # --- FAQ ---
+    st.markdown("### Pertanyaan yang sering diajukan")
+    with st.expander("Apa arti ukuran titik di peta sebaran?"):
+        st.write(
+            "Ukuran titik menunjukkan indeks keparahan, yaitu proksi dari dampak kejadian pada manusia "
+            "dan rumah. Ukuran ini bukan luas area bencana: titik besar berarti dampaknya besar, "
+            "bukan otomatis areanya luas."
+        )
+    with st.expander("Apakah indeks risiko ini resmi?"):
+        st.write(
+            "Bukan. Indeks risiko di dashboard ini adalah komposit sederhana untuk membandingkan "
+            "kecamatan. Indeks Risiko Bencana Indonesia (IRBI) resmi dari BNPB disusun per kabupaten/kota "
+            "dengan metodologi yang berbeda."
+        )
+    with st.expander("Mengapa ada kecamatan yang tidak muncul?"):
+        st.write(
+            "Kalau data meteorologi diunggah, dashboard hanya menampilkan kecamatan yang punya data "
+            "kejadian bencana dan data meteorologi sekaligus. Kecamatan yang datanya belum lengkap "
+            "disebutkan di sidebar."
+        )
+    with st.expander("Format data apa yang bisa diunggah?"):
+        st.write(
+            "Format CSV. Data kejadian bencana bisa berupa laporan BPBD Kabupaten Bogor apa adanya, atau "
+            "tabel sederhana dengan kolom tanggal, jenis_bencana, dan kecamatan. Data meteorologi minimal "
+            "berisi kecamatan dan curah hujan (nama kolom fleksibel). Semuanya bisa diunggah sebagai satu "
+            "file, beberapa file, atau satu folder."
+        )
+    with st.expander("Apa bedanya tab Dashboard Utama dan Peta Analisis 2026?"):
+        st.write(
+            "Dashboard Utama digambar otomatis dari data yang kamu unggah dan bisa difilter. Peta Analisis "
+            "2026 berisi peta hasil analisis yang sudah disiapkan terpisah, satu untuk setiap jenis bencana."
+        )
+
+    # --- Batasan ---
+    st.info(
+        "**Catatan penting.** Dashboard ini adalah prototipe. Koordinat pusat kecamatan adalah perkiraan, "
+        "keparahan dan indeks risiko adalah proksi, dan data meteorologi yang belum diunggah masih berupa "
+        "simulasi. Sesuaikan sumber data dan metodologinya sebelum dipakai untuk laporan atau keputusan resmi."
+    )
+
+    # --- Tentang penyusun ---
+    st.markdown("### Tentang penyusun")
+    st.markdown(
+        "Dikembangkan oleh mahasiswa **Departemen Geofisika dan Meteorologi, IPB University**. "
+        "Instansi dan sumber rujukan terkait: **BPBD Kabupaten Bogor** (data kejadian bencana) dan "
+        "**BMKG** (rujukan klasifikasi intensitas hujan dan data meteorologi)."
+    )
+    if TIM_PENYUSUN:
+        st.markdown("**Tim penyusun:**\n" + "\n".join(f"- {nama}" for nama in TIM_PENYUSUN))
+    if KONTAK_EMAIL:
+        st.markdown(f"**Kontak:** {KONTAK_EMAIL}")
+
+    st.markdown("---")
+    st.markdown(
+        '<div class="home-footer">© 2026 Departemen Geofisika dan Meteorologi, IPB University · '
+        "Prototipe untuk keperluan akademik</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # Peta pada bagian ini BUKAN digambar otomatis dari data kejadian di atas,
@@ -1171,7 +1482,10 @@ def cari_file_peta(jenis: str):
     return None, None
 
 
-tab_utama, tab_peta_2026 = st.tabs(["Dashboard Utama", "Peta Analisis 2026"])
+tab_home, tab_utama, tab_peta_2026 = st.tabs(["Home", "Dashboard Utama", "Peta Analisis 2026"])
+
+with tab_home:
+    halaman_home(df_all, kecamatan_aktif, ada_data_bencana, ada_data_meteo)
 
 with tab_utama:
     # ---------------------------------------------------------------------------
@@ -1184,11 +1498,11 @@ with tab_utama:
         "University · cakupan Kabupaten Bogor.</p>",
         unsafe_allow_html=True,
     )
-    if uploaded is None or not uploaded_meteo_files:
+    if not ada_data_bencana or not ada_data_meteo:
         bagian_kurang = []
-        if uploaded is None:
+        if not ada_data_bencana:
             bagian_kurang.append("kejadian bencana")
-        if not uploaded_meteo_files:
+        if not ada_data_meteo:
             bagian_kurang.append("meteorologi")
         st.markdown(
             '<div class="proto-note">📌 Data ' + " & ".join(bagian_kurang) + " masih "
