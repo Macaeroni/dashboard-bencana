@@ -297,7 +297,7 @@ LOGO_DIR = "logos"  # taruh logo_ipb.png, logo_bpbd.png, logo_bmkg.png di sini (
 
 
 def parse_koordinat(value, tipe: str) -> float:
-"""Mengubah nilai koordinat mentah (format campur: derajat-menit-detik
+   """Mengubah nilai koordinat mentah (format campur: derajat-menit-detik
    dengan berbagai simbol, desimal dengan/tanpa simbol derajat,
    dengan/tanpa huruf mata angin N/S/E/W) menjadi derajat desimal.
 
