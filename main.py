@@ -248,6 +248,9 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
     border: 1px solid rgba(127,127,127,0.32);
 }
 .mini-stat-label { font-size: 0.95rem; opacity: 0.85; margin-bottom: 6px; }
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.mini-stat-card) {
+    padding: 16px 18px 26px !important;
+}
 .mini-stat-value {
     font-size: 1.15rem; font-weight: 600; line-height: 1.3;
     word-break: break-word; overflow-wrap: break-word;
@@ -1374,8 +1377,10 @@ kejadian bencana di Kabupaten Bogor secara lebih mudah dan berbasis data.
             with kolom:
                 with st.container(border=True):
                     st.markdown(
+                        f'<div class="mini-stat-card">'
                         f'<div class="mini-stat-label">{label}</div>'
-                        f'<div class="mini-stat-value">{value}</div>',
+                        f'<div class="mini-stat-value">{value}</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
 
