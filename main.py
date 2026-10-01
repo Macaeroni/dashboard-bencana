@@ -1,111 +1,3 @@
-"""
-Dashboard Pemantauan Bencana — Kabupaten Bogor
-================================================
-Prototipe dashboard interaktif berbasis Streamlit, cakupan Kabupaten
-Bogor (40 kecamatan), dengan data meteorologi per kecamatan yang
-dikorelasikan terhadap kejadian bencana, indeks risiko, dan indikator
-meteorologi.
-
-Cara menjalankan:
-    pip install streamlit pandas numpy plotly
-    streamlit run main.py
-
-HALAMAN
--------
-    Home              : latar belakang, tujuan, fitur, cara pakai, sumber data
-                        & metode, FAQ, batasan, tentang penyusun
-                        (lihat halaman_home()).
-    Dashboard Utama   : KPI, peta sebaran, tren, korelasi meteorologi, dst.
-    Peta Analisis 2026: peta hasil analisis per jenis bencana.
-
-FORMAT CSV YANG DIDUKUNG (DATA KEJADIAN BENCANA)
---------------------------------------------------
-Sama seperti data meteorologi, data kejadian bencana bisa diunggah
-sebagai SATU FILE, BEBERAPA FILE CSV sekaligus (mis. satu file per
-bulan), ATAU SATU FOLDER berisi banyak CSV. Semua file yang formatnya
-dikenali digabung; file yang tidak dikenali dilewati dengan pesan di
-sidebar. `keparahan` dihitung dengan skala gabungan seluruh file
-(bukan per file), supaya angkanya konsisten antar-bulan.
-
-1. Format asli laporan BPBD Kabupaten Bogor (terdeteksi otomatis),
-   dengan ciri: ada baris judul di atas, lalu header berisi kolom
-   seperti KECAMATAN, TANGGAL KEJADIAN, LONGITUDE, LATITUDE, dan 8
-   kolom jenis bencana terpisah (BANJIR, TANAH LONGSOR, KARHUTLA,
-   ANGIN KENCANG, KEKERINGAN, GERAKAN TANAH, GEMPABUMI, NON ALAM)
-   bernilai 1/kosong, plus kolom dampak (korban, rumah rusak, dst).
-   Dashboard otomatis:
-     - mendeteksi baris header (melewati baris judul bila ada)
-     - mengubah 8 kolom jenis bencana jadi satu kolom `jenis_bencana`
-     - mem-parse kolom LONGITUDE/LATITUDE yang formatnya bercampur
-       (derajat-menit-detik, desimal, dengan/tanpa simbol N/S/E/W,
-       dengan/tanpa tanda kutip) menjadi koordinat desimal
-     - kalau koordinat kosong/tidak terbaca, otomatis diisi dari titik
-       tengah kecamatan (lihat isi_koordinat_otomatis())
-     - menghitung `keparahan` (indeks 1-5) dan `rumah_terdampak` dari
-       kolom korban jiwa & rumah rusak/terancam/terendam
-2. Format sederhana (skema lama): tanggal, jenis_bencana, kecamatan,
-   [lat, lon opsional], [meninggal, mengungsi, rumah_terdampak,
-   keparahan, status opsional].
-Jika CSV yang diunggah tidak cocok dengan kedua format di atas, atau
-tidak ada file yang diunggah, dashboard memakai DATA SIMULASI.
-
-DATA METEOROLOGI (BISA LEBIH DARI SATU FILE, ATAU SATU FOLDER)
-----------------------------------------------------------------
-Bisa diunggah sebagai SATU FILE, BEBERAPA FILE CSV sekaligus, ATAU
-SATU FOLDER berisi banyak CSV, tanpa perlu digabung terlebih dahulu —
-cocok untuk kasus di mana tiap kecamatan mengirim laporan cuacanya
-sendiri-sendiri. Setiap file:
-    - boleh berisi satu kecamatan saja (nama kecamatan ditebak dari
-      nama file, mis. "cibinong.csv", "data_ch_Cibinong_2026.csv";
-      kalau tidak bisa ditebak otomatis, dashboard meminta dipilih
-      manual lewat dropdown di sidebar), ATAU
-    - berisi banyak kecamatan sekaligus (butuh kolom kecamatan).
-    - kolom WAJIB: curah hujan (nama kolom fleksibel — "curah_hujan",
-      "curah hujan", "ch", "rr", "rainfall", dst semua dikenali,
-      lihat ALIAS_KOLOM_METEO). Kolom opsional: suhu, kelembaban,
-      kecepatan angin (juga dengan alias fleksibel).
-    - pemisah kolom (koma / titik koma) dan angka desimal (titik /
-      koma) dideteksi otomatis.
-    - kalau ada beberapa baris per kecamatan (mis. data harian),
-      nilainya dirata-ratakan jadi satu baris per kecamatan.
-Semua file digabung (tanpa fallback ke data simulasi untuk kecamatan
-yang tidak tercakup): dashboard HANYA menampilkan kecamatan yang
-punya DATA KEJADIAN BENCANA *dan* DATA METEOROLOGI sekaligus (irisan
-keduanya) — lihat variabel `kecamatan_aktif`. Kalau tidak ada file
-meteorologi yang diunggah sama sekali, seluruh 40 kecamatan memakai
-data simulasi seperti biasa.
-
-CATATAN PENTING:
-    - Koordinat 40 kecamatan (KECAMATAN_BOGOR) adalah APROKSIMASI
-      kasar, dipakai untuk fallback saja — bukan sentroid resmi.
-    - Kolom kerugian dalam rupiah tidak tersedia di data BPBD, sehingga
-      dashboard memakai `rumah_terdampak` (rumah rusak+terancam+
-      terendam) sebagai proksi dampak.
-    - `keparahan` untuk data BPBD dihitung dari kombinasi korban jiwa
-      dan rumah terdampak — bukan angka resmi, hanya proksi untuk
-      keperluan visualisasi/pengurutan.
-    - Indeks risiko pada dashboard ini adalah komposit sederhana hasil
-      simulasi (lihat compute_risk_index()), BUKAN IRBI resmi BNPB
-      (yang levelnya per kabupaten/kota, bukan per kecamatan).
-
-Struktur file:
-    1. Konfigurasi halaman & gaya (CSS)
-    2. Data referensi 40 kecamatan Kabupaten Bogor
-    3. Parser koordinat & pembangkit data simulasi
-    4. Pemuatan data: deteksi format BPBD / format sederhana / simulasi
-       (multi-file) + pemuatan data meteorologi multi-file
-    5. Sidebar: unggah file (bencana & meteorologi: file atau folder),
-       override kecamatan manual, irisan kecamatan aktif, filter
-    5.5 Bar logo (kanan atas, sejajar tab), halaman Home, peta analisis 2026
-    6. Baris KPI ringkasan
-    7. Peta sebaran titik kejadian
-    8. Tren bulanan per jenis bencana
-    9. Korelasi intensitas meteorologi vs kejadian bencana (+ indeks risiko)
-    10. Indikator meteorologi per kecamatan
-    11. Komposisi jenis bencana & ranking kecamatan
-    12. Tabel log kejadian terbaru
-"""
-
 import base64
 import re
 import os
@@ -246,6 +138,11 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
 .hero-chips span {
     font-size: 0.8rem; padding: 4px 11px; border-radius: 999px;
     border: 1px solid rgba(127,127,127,0.32);
+}
+.mini-stat-label { font-size: 0.78rem; opacity: 0.68; margin-bottom: 5px; }
+.mini-stat-value {
+    font-size: 1.15rem; font-weight: 600; line-height: 1.3;
+    word-break: break-word; overflow-wrap: break-word;
 }
 .home-footer { text-align: center; opacity: 0.65; font-size: 0.8rem; padding: 6px 0 2px; }
 
@@ -1359,11 +1256,20 @@ kejadian bencana di Kabupaten Bogor secara lebih mudah dan berbasis data.
         periode = f"{bulan_singkat[tgl_min.month - 1]} {tgl_min.year} – {bulan_singkat[tgl_max.month - 1]} {tgl_max.year}"
         jenis_top = df_data["jenis_bencana"].value_counts().idxmax()
         kec_top = df_data["kecamatan"].value_counts().idxmax()
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Total kejadian", f"{len(df_data):,}".replace(",", "."))
-        s2.metric("Jenis terbanyak", jenis_top)
-        s3.metric("Kecamatan terbanyak", kec_top)
-        s4.metric("Periode data", periode)
+        stat_items = [
+            ("Total kejadian", f"{len(df_data):,}".replace(",", ".")),
+            ("Jenis terbanyak", jenis_top),
+            ("Kecamatan terbanyak", kec_top),
+            ("Periode data", periode),
+        ]
+        for kolom, (label, value) in zip(st.columns(4), stat_items):
+            with kolom:
+                with st.container(border=True):
+                    st.markdown(
+                        f'<div class="mini-stat-label">{label}</div>'
+                        f'<div class="mini-stat-value">{value}</div>',
+                        unsafe_allow_html=True,
+                    )
 
     # --- Sumber data & metode ---
     st.markdown("### Sumber data dan metode")
