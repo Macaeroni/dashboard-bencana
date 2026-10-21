@@ -1,43 +1,136 @@
 """
-Dashboard Pemantauan Bencana - Kabupaten Bogor
+Dashboard Pemantauan Bencana — Kabupaten Bogor
+================================================
+Prototipe dashboard interaktif berbasis Streamlit, cakupan Kabupaten
+Bogor (40 kecamatan), dengan data meteorologi per kecamatan yang
+ditampilkan langsung di titik kejadian pada peta (hover), disertai
+interpretasi per kecamatan, indeks risiko, dan indikator meteorologi.
 
-Cara jalan:
+Cara menjalankan:
     pip install streamlit pandas numpy plotly
     streamlit run main.py
 
-Data yang dipakai:
-- CSV kejadian bencana (format laporan BPBD, atau format sederhana
-  dengan kolom tanggal, jenis_bencana, kecamatan)
-- CSV meteorologi (minimal kolom curah hujan; kecamatan dari kolom
-  atau dari nama file)
-Kalau tidak ada file yang diunggah, dipakai data simulasi.
+HALAMAN
+-------
+    Home              : latar belakang, tujuan, fitur, cara pakai, sumber data
+                        & metode, FAQ, batasan, tentang penyusun
+                        (lihat halaman_home()).
+    Dashboard Utama   : KPI, peta sebaran (hover: bencana, tanggal, desa, meteo),
+                        interpretasi, tren, indikator meteorologi, dst.
+    Peta Analisis 2026: peta hasil analisis per jenis bencana.
 
-Catatan: koordinat kecamatan cuma perkiraan, keparahan dan indeks
-risiko adalah proksi (bukan angka resmi BNPB).
+FORMAT CSV YANG DIDUKUNG (DATA KEJADIAN BENCANA)
+--------------------------------------------------
+Sama seperti data meteorologi, data kejadian bencana bisa diunggah
+sebagai SATU FILE, BEBERAPA FILE CSV sekaligus (mis. satu file per
+bulan), ATAU SATU FOLDER berisi banyak CSV. Semua file yang formatnya
+dikenali digabung; file yang tidak dikenali dilewati dengan pesan di
+sidebar. `keparahan` dihitung dengan skala gabungan seluruh file
+(bukan per file), supaya angkanya konsisten antar-bulan.
+
+1. Format asli laporan BPBD Kabupaten Bogor (terdeteksi otomatis),
+   dengan ciri: ada baris judul di atas, lalu header berisi kolom
+   seperti KECAMATAN, TANGGAL KEJADIAN, LONGITUDE, LATITUDE, dan 8
+   kolom jenis bencana terpisah (BANJIR, TANAH LONGSOR, KARHUTLA,
+   ANGIN KENCANG, KEKERINGAN, GERAKAN TANAH, GEMPABUMI, NON ALAM)
+   bernilai 1/kosong, plus kolom dampak (korban, rumah rusak, dst).
+   Dashboard otomatis:
+     - mendeteksi baris header (melewati baris judul bila ada)
+     - mengubah 8 kolom jenis bencana jadi satu kolom `jenis_bencana`
+     - mem-parse kolom LONGITUDE/LATITUDE yang formatnya bercampur
+       (derajat-menit-detik, desimal, dengan/tanpa simbol N/S/E/W,
+       dengan/tanpa tanda kutip) menjadi koordinat desimal
+     - kalau koordinat kosong/tidak terbaca, otomatis diisi dari titik
+       tengah kecamatan (lihat isi_koordinat_otomatis())
+     - menghitung `keparahan` (indeks 1-5) dan `rumah_terdampak` dari
+       kolom korban jiwa & rumah rusak/terancam/terendam
+2. Format sederhana (skema lama): tanggal, jenis_bencana, kecamatan,
+   [lat, lon opsional], [meninggal, mengungsi, rumah_terdampak,
+   keparahan, status opsional].
+Jika CSV yang diunggah tidak cocok dengan kedua format di atas, atau
+tidak ada file yang diunggah, dashboard memakai DATA SIMULASI.
+
+DATA METEOROLOGI (BISA LEBIH DARI SATU FILE, ATAU SATU FOLDER)
+----------------------------------------------------------------
+Bisa diunggah sebagai SATU FILE, BEBERAPA FILE CSV sekaligus, ATAU
+SATU FOLDER berisi banyak CSV, tanpa perlu digabung terlebih dahulu —
+cocok untuk kasus di mana tiap kecamatan mengirim laporan cuacanya
+sendiri-sendiri. Setiap file:
+    - boleh berisi satu kecamatan saja (nama kecamatan ditebak dari
+      nama file, mis. "cibinong.csv", "data_ch_Cibinong_2026.csv";
+      kalau tidak bisa ditebak otomatis, dashboard meminta dipilih
+      manual lewat dropdown di sidebar), ATAU
+    - berisi banyak kecamatan sekaligus (butuh kolom kecamatan).
+    - kolom WAJIB: curah hujan (nama kolom fleksibel — "curah_hujan",
+      "curah hujan", "ch", "rr", "rainfall", dst semua dikenali,
+      lihat ALIAS_KOLOM_METEO). Kolom opsional: suhu, kelembaban,
+      kecepatan angin (juga dengan alias fleksibel).
+    - pemisah kolom (koma / titik koma) dan angka desimal (titik /
+      koma) dideteksi otomatis.
+    - kalau ada beberapa baris per kecamatan (mis. data harian),
+      nilainya dirata-ratakan jadi satu baris per kecamatan.
+Semua file digabung (tanpa fallback ke data simulasi untuk kecamatan
+yang tidak tercakup): dashboard HANYA menampilkan kecamatan yang
+punya DATA KEJADIAN BENCANA *dan* DATA METEOROLOGI sekaligus (irisan
+keduanya) — lihat variabel `kecamatan_aktif`. Kalau tidak ada file
+meteorologi yang diunggah sama sekali, seluruh 40 kecamatan memakai
+data simulasi seperti biasa.
+
+CATATAN PENTING:
+    - Koordinat 40 kecamatan (KECAMATAN_BOGOR) adalah APROKSIMASI
+      kasar, dipakai untuk fallback saja — bukan sentroid resmi.
+    - Kolom kerugian dalam rupiah tidak tersedia di data BPBD, sehingga
+      dashboard memakai `rumah_terdampak` (rumah rusak+terancam+
+      terendam) sebagai proksi dampak.
+    - `keparahan` untuk data BPBD dihitung dari kombinasi korban jiwa
+      dan rumah terdampak — bukan angka resmi, hanya proksi untuk
+      keperluan visualisasi/pengurutan.
+    - Indeks risiko pada dashboard ini adalah komposit sederhana hasil
+      simulasi (lihat compute_risk_index()), BUKAN IRBI resmi BNPB
+      (yang levelnya per kabupaten/kota, bukan per kecamatan).
+
+Struktur file:
+    1. Konfigurasi halaman & gaya (CSS)
+    2. Data referensi 40 kecamatan Kabupaten Bogor
+    3. Parser koordinat & pembangkit data simulasi
+    4. Pemuatan data: deteksi format BPBD / format sederhana / simulasi
+       (multi-file) + pemuatan data meteorologi multi-file
+    5. Sidebar: unggah file (bencana & meteorologi: file atau folder),
+       override kecamatan manual, irisan kecamatan aktif, filter
+    5.5 Bar logo (kanan atas, sejajar tab), halaman Home, peta analisis 2026
+    6. Baris KPI ringkasan
+    7. Peta sebaran titik kejadian
+    8. Tren bulanan per jenis bencana
+    9. (dihapus) -- diganti hover meteorologi di peta + interpretasi di bawah peta
+    10. Indikator meteorologi per kecamatan
+    11. Komposisi jenis bencana & ranking kecamatan
+    12. Tabel log kejadian terbaru
 """
 
 import base64
-import os
 import re
+import os
 from io import StringIO
 
 import numpy as np
+from html import escape
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+# ---------------------------------------------------------------------------
+# 1. KONFIGURASI HALAMAN & GAYA
+# ---------------------------------------------------------------------------
+
 st.set_page_config(
-    page_title="Dashboard Bencana - Kabupaten Bogor",
+    page_title="Dashboard Bencana — Kabupaten Bogor",
     page_icon="🌧️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------
-# Konstanta
-# ---------------------------------------------------------------
-
+# Jenis bencana mengikuti 8 kolom pada format BPBD Kabupaten Bogor.
 TYPE_COLUMN_MAP = {
     "BANJIR": "Banjir",
     "TANAH LONGSOR": "Tanah Longsor",
@@ -59,25 +152,157 @@ PALETTE = {
     "Non Alam": "#6B7A8F",
     "Tidak Diketahui": "#8A96A5",
 }
-# jenis bencana yang berkaitan dengan cuaca, dipakai di grafik korelasi
-HIDROMETEOROLOGI = ["Banjir", "Tanah Longsor", "Angin Kencang", "Kekeringan"]
-RISK_COLOR = {"Rendah": "#3FA79E", "Sedang": "#D9A441", "Tinggi": "#E8543F"}
-STATUS_OPTIONS = ["Siaga Darurat", "Tanggap Darurat", "Pemantauan", "Selesai"]
+# Jenis bencana -> parameter meteorologi pemicu utamanya (dipakai untuk
+# interpretasi di bawah peta). Gempa Bumi / Non Alam tidak dikaitkan cuaca.
+PEMICU_METEO = {
+    "Banjir": "hujan", "Tanah Longsor": "hujan", "Gerakan Tanah": "hujan",
+    "Angin Kencang": "angin", "Kekeringan": "kering", "Karhutla": "kering",
+}
+KOLOM_METEO_NILAI = ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
+DESA_KOSONG = "Tidak tercatat"
 
-NAMA_BULAN = {
-    1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
-    7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember",
+CUSTOM_CSS = """
+<style>
+html, body, .stApp { font-family: 'IBM Plex Sans', sans-serif; }
+button[data-baseweb="tab"] {
+    white-space: nowrap !important;
+    height: auto !important;
+    min-height: 44px !important;
+}
+[data-baseweb="tab-list"] {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    height: auto !important;
+}
+[data-baseweb="tab-highlight"] { height: 2.5px !important; }
+.block-container {
+    padding-top: 3.5rem; padding-bottom: 3rem; max-width: 1360px;
+    padding-left: 3rem; padding-right: 3rem;
+    position: relative;
+}
+/* Logo di ujung kanan, sejajar baris tab */
+div[data-testid="stElementContainer"]:has(.logo-bar),
+.element-container:has(.logo-bar) {
+    position: absolute;
+    top: 3.5rem;
+    right: 3rem;
+    height: 44px;
+    width: auto;
+    z-index: 5;
+}
+.logo-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    height: 44px;
+}
+.logo-bar img {
+    height: 28px;
+    width: auto;
+    object-fit: contain;
+}
+div[data-testid="stMetric"] {
+    background: rgba(127,127,127,0.06);
+    border: 1px solid rgba(127,127,127,0.18);
+    border-radius: 10px;
+    padding: 12px 16px 8px;
+}
+div[data-testid="stMetricLabel"],
+div[data-testid="stMetricLabel"] p,
+div[data-testid="stMetricLabel"] div {
+    font-size: 0.8rem;
+    opacity: 0.75;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.25;
+}
+div[data-testid="stMetricValue"],
+div[data-testid="stMetricValue"] div {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.2;
+}
+h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
+.dash-caption { color: rgba(127,127,127,0.9); font-size: 0.85rem; margin-top: -8px; }
+.proto-note {
+    border: 1px dashed rgba(127,127,127,0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    opacity: 0.85;
+    margin-bottom: 1rem;
 }
 
-LOGO_DIR = "logos"
-PETA_ANALISIS_DIR = "peta_analisis"
-JENIS_PETA_2026 = ["Banjir", "Tanah Longsor", "Kebakaran", "Kekeringan", "Angin Kencang", "Karhutla"]
+/* Halaman Home */
+.hero {
+    border: 1px solid rgba(127,127,127,0.22);
+    border-radius: 14px;
+    padding: 30px 32px 26px;
+    margin: 0.4rem 0 1.6rem;
+    background: linear-gradient(135deg, rgba(63,167,158,0.14), rgba(232,84,63,0.07));
+}
+.hero-kicker { font-size: 0.85rem; opacity: 0.75; margin-bottom: 6px; }
+.hero-title { font-size: 2.1rem; font-weight: 600; line-height: 1.2; margin-bottom: 10px; }
+.hero-sub { font-size: 1.02rem; opacity: 0.85; max-width: 62ch; line-height: 1.55; }
+.hero-chips { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+.hero-chips span {
+    font-size: 0.8rem; padding: 4px 11px; border-radius: 999px;
+    border: 1px solid rgba(127,127,127,0.32);
+}
+.mini-stat-label { font-size: 0.95rem; opacity: 0.85; margin-bottom: 6px; }
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.mini-stat-card) {
+    padding: 16px 18px 26px !important;
+}
+.mini-stat-value {
+    font-size: 1.15rem; font-weight: 600; line-height: 1.3;
+    word-break: break-word; overflow-wrap: break-word;
+}
+.home-footer { text-align: center; opacity: 0.65; font-size: 0.8rem; padding: 6px 0 2px; }
 
-# isi kalau mau ditampilkan di halaman Home
-TIM_PENYUSUN = []
-KONTAK_EMAIL = ""
+/* Layar kecil (HP): logo di baris sendiri, tab turun di bawahnya */
+@media (max-width: 768px) {
+    .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    div[data-testid="stElementContainer"]:has(.logo-bar),
+    .element-container:has(.logo-bar) {
+        right: 1rem;
+        left: 1rem;
+    }
+    .logo-bar {
+        justify-content: flex-end;
+        gap: 10px;
+    }
+    .logo-bar img {
+        height: 24px;
+    }
+    /* turunkan tab utama supaya tidak tertimpa logo */
+    [data-testid="stTabs"] > [data-baseweb="tab-list"] {
+        margin-top: 52px;
+    }
+    /* tab di dalam tab (mis. "Curah hujan per kecamatan") tidak ikut turun */
+    [data-testid="stTabs"] [data-testid="stTabs"] > [data-baseweb="tab-list"] {
+        margin-top: 0;
+    }
+    .hero { padding: 20px 18px 18px; }
+    .hero-title { font-size: 1.5rem; }
+}
 
-# koordinat titik tengah kecamatan (perkiraan kasar)
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# 2. DATA REFERENSI 40 KECAMATAN KABUPATEN BOGOR
+# ---------------------------------------------------------------------------
+# Nama mengikuti UU No. 102 Tahun 2024 tentang Kabupaten Bogor (Pasal 3).
+# Koordinat adalah APROKSIMASI titik tengah wilayah untuk kebutuhan
+# fallback peta — ganti dengan data BIG/BPS untuk presisi lokasi.
+
 KECAMATAN_BOGOR = [
     {"n": "Cibinong", "lat": -6.4817, "lon": 106.8540},
     {"n": "Gunung Putri", "lat": -6.4400, "lon": 106.9250},
@@ -120,111 +345,52 @@ KECAMATAN_BOGOR = [
     {"n": "Leuwisadeng", "lat": -6.5750, "lon": 106.6100},
     {"n": "Tenjolaya", "lat": -6.6000, "lon": 106.7000},
 ]
+
 MAP_CENTER = {"lat": -6.55, "lon": 106.80}
 MAP_ZOOM = 9.4
+LOGO_DIR = "logos"  # taruh logo_ipb.png, logo_bpbd.png, logo_bmkg.png di sini (tampil di kanan atas, sejajar tab)
 
-# ---------------------------------------------------------------
-# CSS
-# ---------------------------------------------------------------
-
-st.markdown(
-    """
-<style>
-html, body, .stApp { font-family: 'IBM Plex Sans', sans-serif; }
-button[data-baseweb="tab"] { white-space: nowrap !important; height: auto !important; min-height: 44px !important; }
-[data-baseweb="tab-list"] { overflow-x: auto !important; flex-wrap: nowrap !important; height: auto !important; }
-[data-baseweb="tab-highlight"] { height: 2.5px !important; }
-.block-container {
-    padding: 3.5rem 3rem 3rem 3rem; max-width: 1360px; position: relative;
-}
-/* logo di kanan atas, sejajar tab */
-div[data-testid="stElementContainer"]:has(.logo-bar),
-.element-container:has(.logo-bar) {
-    position: absolute; top: 3.5rem; right: 3rem; height: 44px; width: auto; z-index: 5;
-}
-.logo-bar { display: flex; align-items: center; justify-content: flex-end; gap: 14px; height: 44px; }
-.logo-bar img { height: 28px; width: auto; object-fit: contain; }
-div[data-testid="stMetric"] {
-    background: rgba(127,127,127,0.06);
-    border: 1px solid rgba(127,127,127,0.18);
-    border-radius: 10px; padding: 12px 16px 8px;
-}
-div[data-testid="stMetricLabel"], div[data-testid="stMetricLabel"] p, div[data-testid="stMetricLabel"] div {
-    font-size: 0.8rem; opacity: 0.75; white-space: normal !important;
-    overflow: visible !important; text-overflow: clip !important; line-height: 1.25;
-}
-div[data-testid="stMetricValue"], div[data-testid="stMetricValue"] div {
-    white-space: normal !important; overflow: visible !important; text-overflow: clip !important; line-height: 1.2;
-}
-h1, h2, h3 { font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
-.dash-caption { color: rgba(127,127,127,0.9); font-size: 0.85rem; margin-top: -8px; }
-.proto-note {
-    border: 1px dashed rgba(127,127,127,0.35); border-radius: 10px;
-    padding: 10px 14px; font-size: 0.85rem; opacity: 0.85; margin-bottom: 1rem;
-}
-.hero {
-    border: 1px solid rgba(127,127,127,0.22); border-radius: 14px;
-    padding: 30px 32px 26px; margin: 0.4rem 0 1.6rem;
-    background: linear-gradient(135deg, rgba(63,167,158,0.14), rgba(232,84,63,0.07));
-}
-.hero-kicker { font-size: 0.85rem; opacity: 0.75; margin-bottom: 6px; }
-.hero-title { font-size: 2.1rem; font-weight: 600; line-height: 1.2; margin-bottom: 10px; }
-.hero-sub { font-size: 1.02rem; opacity: 0.85; max-width: 62ch; line-height: 1.55; }
-.hero-chips { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
-.hero-chips span { font-size: 0.8rem; padding: 4px 11px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.32); }
-.mini-stat-label { font-size: 0.95rem; opacity: 0.85; margin-bottom: 6px; }
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.mini-stat-card) { padding: 16px 18px 26px !important; }
-.mini-stat-value { font-size: 1.15rem; font-weight: 600; line-height: 1.3; word-break: break-word; overflow-wrap: break-word; }
-.home-footer { text-align: center; opacity: 0.65; font-size: 0.8rem; padding: 6px 0 2px; }
-
-/* tampilan HP */
-@media (max-width: 768px) {
-    .block-container { padding-left: 1rem; padding-right: 1rem; }
-    div[data-testid="stElementContainer"]:has(.logo-bar), .element-container:has(.logo-bar) { right: 1rem; left: 1rem; }
-    .logo-bar { justify-content: flex-end; gap: 10px; }
-    .logo-bar img { height: 24px; }
-    [data-testid="stTabs"] > [data-baseweb="tab-list"] { margin-top: 52px; }
-    [data-testid="stTabs"] [data-testid="stTabs"] > [data-baseweb="tab-list"] { margin-top: 0; }
-    .hero { padding: 20px 18px 18px; }
-    .hero-title { font-size: 1.5rem; }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-# ---------------------------------------------------------------
-# Koordinat
-# ---------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 3. PARSER KOORDINAT & PEMBANGKIT DATA SIMULASI
+# ---------------------------------------------------------------------------
 
 
-def parse_koordinat(value, tipe):
-    """Ubah koordinat mentah (DMS atau desimal, dengan/tanpa N/S/E/W)
-    jadi desimal. tipe = "lat" atau "lon". Kalau gagal atau di luar
-    rentang Bogor, hasilnya NaN."""
+def parse_koordinat(value, tipe: str) -> float:
+    """Mengubah nilai koordinat mentah (format campur: derajat-menit-detik
+    dengan berbagai simbol, desimal dengan/tanpa simbol derajat,
+    dengan/tanpa huruf mata angin N/S/E/W) menjadi derajat desimal.
+
+    `tipe` harus "lat" atau "lon" — dipakai untuk menentukan tanda
+    (+/-) default ketika huruf mata angin tidak ada, dan untuk
+    memvalidasi hasil ada di rentang wajar Kabupaten Bogor. Nilai yang
+    gagal di-parse atau di luar rentang wajar dikembalikan sebagai NaN
+    (akan diisi otomatis dari koordinat kecamatan, lihat
+    isi_koordinat_otomatis())."""
     if pd.isna(value):
         return np.nan
     s = str(value).strip()
     if s == "" or s.lower() == "nan":
         return np.nan
 
+    # normalisasi tanda kutip pintar -> lurus
     s = s.replace("\u201c", '"').replace("\u201d", '"').replace("''", '"')
 
-    # huruf mata angin di ujung
     hemisphere = None
     m_hem = re.search(r"([NSEWnsew])\s*$", s)
     if m_hem:
         hemisphere = m_hem.group(1).upper()
         s = s[: m_hem.start()].strip()
+    # huruf mata angin hanya valid untuk sumbunya sendiri (N/S untuk lat,
+    # E/W untuk lon) — kalau tertukar (kesalahan input), abaikan saja.
     valid_hem = {"N", "S"} if tipe == "lat" else {"E", "W"}
     if hemisphere not in valid_hem:
         hemisphere = None
 
-    negative = s.startswith("-")
+    negative = s.strip().startswith("-")
     s_clean = s.lstrip("-").strip()
 
     decimal = None
-    # derajat-menit-detik, mis. 106°53'14,634
+    # pola derajat-menit-detik: 106°53'14,634 / 6⁰28'40 / dst.
     dms = re.match(r"^(\d{1,3})[°ºo⁰\s]+(\d{1,2})['\u2019\s]+([\d.,]+)", s_clean)
     if dms:
         deg = float(dms.group(1))
@@ -237,7 +403,7 @@ def parse_koordinat(value, tipe):
         if minute < 60 and sec < 60:
             decimal = deg + minute / 60 + sec / 3600
     if decimal is None:
-        # desimal biasa
+        # pola desimal: 106.488465° / 6,587742
         dd = re.match(r"^(\d{1,3}[.,]\d+)", s_clean)
         if dd:
             decimal = float(dd.group(1).replace(",", "."))
@@ -256,6 +422,7 @@ def parse_koordinat(value, tipe):
     else:
         decimal = -abs(decimal) if tipe == "lat" else abs(decimal)
 
+    # validasi rentang longgar wilayah Kabupaten Bogor
     if tipe == "lat" and not (-8 <= decimal <= -5):
         return np.nan
     if tipe == "lon" and not (105 <= decimal <= 108):
@@ -263,16 +430,20 @@ def parse_koordinat(value, tipe):
     return round(decimal, 6)
 
 
-def isi_koordinat_otomatis(df_events, rng_seed=1):
-    """Isi lat/lon yang kosong dengan titik tengah kecamatan + sedikit
-    offset acak supaya titiknya tidak numpuk."""
+def isi_koordinat_otomatis(df_events: pd.DataFrame, rng_seed: int = 1) -> pd.DataFrame:
+    """Mengisi lat/lon yang kosong/tidak valid dari titik tengah
+    kecamatan (KECAMATAN_BOGOR), ditambah offset acak kecil supaya
+    titik-titik di kecamatan yang sama tidak saling menumpuk di peta.
+    Nama kecamatan yang tidak cocok dengan daftar 40 kecamatan akan
+    diberi tahu lewat peringatan di sidebar dan tidak tampil di peta."""
     df_events = df_events.copy()
     rng = np.random.default_rng(rng_seed)
     lookup = {k["n"].lower(): (k["lat"], k["lon"]) for k in KECAMATAN_BOGOR}
 
-    for kol in ["lat", "lon"]:
-        if kol not in df_events.columns:
-            df_events[kol] = np.nan
+    if "lat" not in df_events.columns:
+        df_events["lat"] = np.nan
+    if "lon" not in df_events.columns:
+        df_events["lon"] = np.nan
 
     tidak_cocok = set()
     need_fill = df_events["lat"].isna() | df_events["lon"].isna()
@@ -287,34 +458,21 @@ def isi_koordinat_otomatis(df_events, rng_seed=1):
 
     if tidak_cocok:
         st.sidebar.warning(
-            "Nama kecamatan ini tidak cocok dengan daftar 40 kecamatan, jadi tidak tampil di peta: "
+            "Nama kecamatan berikut tidak cocok dengan daftar 40 kecamatan "
+            "Kabupaten Bogor, sehingga tidak tampil di peta: "
             + ", ".join(sorted(str(x) for x in tidak_cocok))
         )
     return df_events
 
 
-# ---------------------------------------------------------------
-# Data simulasi
-# ---------------------------------------------------------------
-
-
-def klasifikasi_curah_hujan(mm_per_hari):
-    """Kategori hujan harian menurut BMKG."""
-    if pd.isna(mm_per_hari):
-        return "Tidak Diketahui"
-    if mm_per_hari < 5:
-        return "Tidak Hujan/Berawan"
-    elif mm_per_hari < 20:
-        return "Ringan"
-    elif mm_per_hari < 50:
-        return "Sedang"
-    elif mm_per_hari < 100:
-        return "Lebat"
-    return "Sangat Lebat"
+STATUS_OPTIONS = ["Siaga Darurat", "Tanggap Darurat", "Pemantauan", "Selesai"]
 
 
 @st.cache_data
-def generate_dummy_data(n_rows=220, seed=42):
+def generate_dummy_data(n_rows: int = 220, seed: int = 42) -> pd.DataFrame:
+    """Data kejadian bencana simulasi, tersebar di 40 kecamatan Kabupaten
+    Bogor, memakai skema kolom yang sama dengan hasil parsing CSV asli
+    (lihat load_data())."""
     rng = np.random.default_rng(seed)
     types = list(TYPE_COLUMN_MAP.values())
     rows = []
@@ -325,16 +483,18 @@ def generate_dummy_data(n_rows=220, seed=42):
         hari = rng.integers(1, 28)
         tahun = rng.choice([2024, 2025, 2026], p=[0.25, 0.35, 0.40])
         keparahan = round(float(rng.uniform(1.0, 5.0)), 1)
+        rumah_terdampak = int(rng.poisson(keparahan * 15))
         rows.append(
             {
                 "tanggal": pd.Timestamp(year=int(tahun), month=int(bulan), day=int(hari)),
                 "jenis_bencana": jenis,
                 "kecamatan": kec["n"],
+                "desa": DESA_KOSONG,
                 "lat": kec["lat"] + rng.uniform(-0.03, 0.03),
                 "lon": kec["lon"] + rng.uniform(-0.03, 0.03),
                 "meninggal": int(rng.poisson(keparahan * 0.3)),
                 "mengungsi": int(rng.poisson(keparahan * 80)),
-                "rumah_terdampak": int(rng.poisson(keparahan * 15)),
+                "rumah_terdampak": rumah_terdampak,
                 "keparahan": keparahan,
                 "status": rng.choice(STATUS_OPTIONS, p=[0.40, 0.35, 0.15, 0.10]),
             }
@@ -343,12 +503,15 @@ def generate_dummy_data(n_rows=220, seed=42):
 
 
 @st.cache_data
-def generate_meteo_data(seed=7):
+def generate_meteo_data(seed: int = 7) -> pd.DataFrame:
+    """Data meteorologi simulasi per kecamatan. Dipakai kalau tidak ada
+    file meteorologi yang diunggah sama sekali (lihat bagian 5)."""
     rng = np.random.default_rng(seed)
     rows = []
     for kec in KECAMATAN_BOGOR:
         southness = max(0.0, (-6.35 - kec["lat"]))
-        curah = max(0.0, float(rng.normal(12 + southness * 55, 12)))
+        base_hujan = 12 + southness * 55
+        curah = max(0.0, float(rng.normal(base_hujan, 12)))
         rows.append(
             {
                 "kecamatan": kec["n"],
@@ -364,30 +527,54 @@ def generate_meteo_data(seed=7):
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------
-# Data meteorologi
-# ---------------------------------------------------------------
+def klasifikasi_curah_hujan(mm_per_hari: float) -> str:
+    """Klasifikasi intensitas hujan harian mengikuti kategori BMKG
+    (mm/hari): ringan 5-20, sedang 20-50, lebat 50-100, sangat lebat >100."""
+    if pd.isna(mm_per_hari):
+        return "Tidak Diketahui"
+    if mm_per_hari < 5:
+        return "Tidak Hujan/Berawan"
+    elif mm_per_hari < 20:
+        return "Ringan"
+    elif mm_per_hari < 50:
+        return "Sedang"
+    elif mm_per_hari < 100:
+        return "Lebat"
+    else:
+        return "Sangat Lebat"
 
 
-def _norm_nama(s):
+# --- Pencocokan nama kecamatan (dipakai untuk menebak kecamatan dari nama
+# file meteorologi, dan menormalisasi nilai kolom "kecamatan" di dalam CSV
+# supaya variasi kapitalisasi/spasi tetap cocok dengan daftar resmi) ---
+
+
+def _normalisasi_nama_kecamatan(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(s).strip().lower())
 
 
-_KEC_LOOKUP = {_norm_nama(k["n"]): k["n"] for k in KECAMATAN_BOGOR}
+_KECAMATAN_NORM_LOOKUP = {_normalisasi_nama_kecamatan(k["n"]): k["n"] for k in KECAMATAN_BOGOR}
 
 
-def cari_kecamatan_dari_nama_file(filename):
-    """Tebak kecamatan dari nama file, mis. data_ch_Cibinong_2026.csv -> Cibinong."""
+def cari_kecamatan_dari_nama_file(filename: str):
+    """Menebak nama kecamatan dari nama file (mis. 'cibinong.csv',
+    'data_ch_Cibinong_2026.csv' -> 'Cibinong'). Mengembalikan None kalau
+    tidak ada nama kecamatan yang cocok sebagai bagian dari nama file."""
     base = re.sub(r"\.csv$", "", filename, flags=re.IGNORECASE)
-    norm = _norm_nama(base)
-    kandidat = [asli for key, asli in _KEC_LOOKUP.items() if key and key in norm]
+    norm = _normalisasi_nama_kecamatan(base)
+    kandidat = [asli for key, asli in _KECAMATAN_NORM_LOOKUP.items() if key and key in norm]
     if not kandidat:
         return None
-    # kalau ada beberapa yang cocok, ambil nama terpanjang
+    # kalau beberapa nama kecamatan cocok sebagai substring, pilih yang
+    # namanya paling panjang (paling spesifik, mengurangi salah tebak
+    # akibat nama kecamatan yang jadi substring nama kecamatan lain)
     return max(kandidat, key=len)
 
 
-# variasi nama kolom yang diterima
+# Alias nama kolom yang diterima untuk CSV data meteorologi, supaya tidak
+# harus mengetik nama kolom persis seperti di kode (mis. "ch", "curah
+# hujan", "rr", atau "Curah Hujan (mm/hari)" semua dikenali sebagai
+# `curah_hujan_mm_hari`).
 ALIAS_KOLOM_METEO = {
     "kecamatan": {"kecamatan", "kec", "nama_kecamatan"},
     "curah_hujan_mm_hari": {
@@ -403,25 +590,37 @@ ALIAS_KOLOM_METEO = {
 }
 
 
-def _norm_kolom(nama):
+def _normalisasi_nama_kolom(nama: str) -> str:
+    """Menyeragamkan nama kolom supaya bisa dicocokkan ke ALIAS_KOLOM_METEO:
+    huruf kecil, isi dalam kurung dibuang (mis. "(mm/hari)"), spasi/simbol
+    diganti underscore. Contoh: "Curah Hujan (mm/hari)" -> "curah_hujan"."""
     s = str(nama).strip().lower()
     s = re.sub(r"\(.*?\)", "", s)
-    return re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return s
 
 
-def _petakan_kolom_meteo(df_csv):
-    kolom_norm = {_norm_kolom(c): c for c in df_csv.columns}
-    ganti = {}
+def _petakan_kolom_meteo(df_csv: pd.DataFrame) -> pd.DataFrame:
+    """Mengganti nama kolom CSV meteorologi (apa pun variasi penulisannya)
+    menjadi nama kolom baku yang dipakai kode, berdasarkan ALIAS_KOLOM_METEO."""
+    kolom_ternormalisasi = {_normalisasi_nama_kolom(c): c for c in df_csv.columns}
+    peta_ganti_nama = {}
     for nama_baku, alias_set in ALIAS_KOLOM_METEO.items():
         for alias in alias_set:
-            if alias in kolom_norm:
-                ganti[kolom_norm[alias]] = nama_baku
+            if alias in kolom_ternormalisasi:
+                peta_ganti_nama[kolom_ternormalisasi[alias]] = nama_baku
                 break
-    return df_csv.rename(columns=ganti)
+    return df_csv.rename(columns=peta_ganti_nama)
 
 
-def _baca_csv_fleksibel(uploaded_file):
-    """Baca CSV dengan pemisah otomatis (koma/titik koma/tab) dan buang BOM."""
+def _baca_csv_fleksibel(uploaded_file) -> pd.DataFrame:
+    """Membaca CSV meteorologi dengan toleransi format yang lebih longgar
+    daripada pd.read_csv() polos:
+    - pemisah kolom dideteksi otomatis (koma, titik koma, tab, dst),
+      bukan diasumsikan koma — banyak alat ekspor (mis. Climate Engine,
+      Excel versi Indonesia) memakai titik koma;
+    - BOM UTF-8 di awal file (karakter tak kasat mata yang kadang
+      menempel di nama kolom pertama, mis. "\\ufefftanggal") dibuang."""
     uploaded_file.seek(0)
     raw = uploaded_file.read()
     if isinstance(raw, bytes):
@@ -432,8 +631,11 @@ def _baca_csv_fleksibel(uploaded_file):
     return pd.read_csv(StringIO(text), sep=None, engine="python")
 
 
-def _parse_angka(value):
-    """Parse angka format Indonesia (9,2963) maupun internasional (9.2963)."""
+def _parse_angka(value) -> float:
+    """Mem-parse angka yang mungkin memakai koma sebagai pemisah desimal
+    (format Indonesia, mis. "9,2963") maupun titik (format internasional,
+    mis. "9.2963"), dengan atau tanpa pemisah ribuan. Mengembalikan NaN
+    kalau tidak bisa di-parse sama sekali."""
     if pd.isna(value):
         return np.nan
     s = str(value).strip()
@@ -443,14 +645,18 @@ def _parse_angka(value):
         return float(s)
     except ValueError:
         pass
+    # format Indonesia: titik = pemisah ribuan (dibuang), koma = desimal
+    s2 = s.replace(".", "").replace(",", ".")
     try:
-        return float(s.replace(".", "").replace(",", "."))
+        return float(s2)
     except ValueError:
         return np.nan
 
 
-def _perlu_pilih_manual_kecamatan(uploaded_file):
-    """True kalau kecamatan tidak bisa ditebak dari nama file maupun kolom."""
+def _perlu_pilih_manual_kecamatan(uploaded_file) -> bool:
+    """True kalau file TIDAK punya kolom kecamatan yang dikenali DAN nama
+    kecamatan tidak bisa ditebak dari nama filenya — sehingga perlu
+    dropdown pilihan manual di sidebar."""
     if cari_kecamatan_dari_nama_file(uploaded_file.name) is not None:
         return False
     try:
@@ -465,8 +671,11 @@ def _perlu_pilih_manual_kecamatan(uploaded_file):
 
 
 def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
-    """Baca satu file meteorologi, rata-ratakan per kecamatan.
-    Return (df, None) kalau berhasil, atau (None, pesan_error)."""
+    """Membaca & mem-parse satu file CSV meteorologi, lalu mengagregasinya
+    (rata-rata) jadi satu baris per kecamatan. Mengembalikan
+    (DataFrame_teragregasi, None) kalau berhasil, atau (None, pesan_error)
+    kalau gagal — supaya file lain tetap bisa diproses walau satu file
+    bermasalah."""
     try:
         df_csv = _baca_csv_fleksibel(uploaded_file)
     except Exception:
@@ -477,30 +686,37 @@ def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
 
     if "curah_hujan_mm_hari" not in df_csv.columns:
         return None, (
-            f"File `{uploaded_file.name}` dilewati karena tidak ada kolom curah hujan "
-            "(coba beri nama kolom \"curah_hujan\", \"ch\", atau \"rr\")."
+            f"File `{uploaded_file.name}` dilewati — tidak ada kolom curah hujan yang "
+            "dikenali (coba beri nama kolom seperti \"curah_hujan\", \"ch\", \"rr\", "
+            "atau \"curah hujan\")."
         )
 
     for kol in ["suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
         if kol not in df_csv.columns:
             df_csv[kol] = np.nan
+
     for kol in ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
         df_csv[kol] = df_csv[kol].apply(_parse_angka)
 
     if "kecamatan" in df_csv.columns and df_csv["kecamatan"].notna().any():
         df_csv["kecamatan"] = df_csv["kecamatan"].astype(str).str.strip()
-        df_csv["kecamatan"] = df_csv["kecamatan"].apply(lambda v: _KEC_LOOKUP.get(_norm_nama(v), v))
+        # cocokkan tiap nilai ke ejaan resmi 40 kecamatan (case/spasi-insensitive);
+        # kalau tidak cocok, nilai aslinya dipertahankan apa adanya (akan
+        # ditandai "tidak dikenal" di tahap penggabungan)
+        df_csv["kecamatan"] = df_csv["kecamatan"].apply(
+            lambda v: _KECAMATAN_NORM_LOOKUP.get(_normalisasi_nama_kecamatan(v), v)
+        )
     elif kecamatan_override:
         df_csv["kecamatan"] = kecamatan_override
     else:
         return None, (
-            f"File `{uploaded_file.name}` dilewati karena tidak ada kolom kecamatan "
-            "dan nama kecamatan tidak terbaca dari nama file."
+            f"File `{uploaded_file.name}` dilewati — tidak ada kolom kecamatan, dan "
+            "nama kecamatan tidak bisa ditebak dari nama filenya."
         )
 
     df_csv = df_csv.dropna(subset=["curah_hujan_mm_hari", "kecamatan"])
     if df_csv.empty:
-        return None, f"File `{uploaded_file.name}` dilewati karena tidak ada baris curah hujan yang valid."
+        return None, f"File `{uploaded_file.name}` dilewati — tidak ada baris curah hujan yang valid."
 
     agg = df_csv.groupby("kecamatan").agg(
         curah_hujan_mm_hari=("curah_hujan_mm_hari", "mean"),
@@ -511,56 +727,76 @@ def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
     return agg, None
 
 
-def load_meteo_data_multi(uploaded_files, kecamatan_override_map):
-    """Gabungkan semua file meteorologi. Return (df, daftar_pesan)."""
+def load_meteo_data_multi(uploaded_files, kecamatan_override_map: dict):
+    """Menggabungkan satu atau beberapa file CSV meteorologi TANPA perlu
+    digabung manual jadi satu file dulu: tiap file dibaca & diagregasi
+    terpisah (lihat _baca_satu_file_meteo()), baru hasilnya digabung di
+    sini. Kecamatan yang muncul di lebih dari satu file dirata-ratakan
+    antar file.
+
+    kecamatan_override_map: dict {nama_file: nama_kecamatan_pilihan_manual},
+    dipakai untuk file yang tidak punya kolom kecamatan dan tidak bisa
+    ditebak dari nama filenya (lihat _perlu_pilih_manual_kecamatan()).
+
+    TIDAK melakukan fallback ke data simulasi untuk kecamatan yang tidak
+    tercakup — pembatasan ke kecamatan yang datanya lengkap ditangani di
+    bagian 5 lewat `kecamatan_aktif`.
+
+    Mengembalikan (df_gabungan, daftar_pesan_peringatan)."""
     semua_hasil = []
     pesan = []
     for f in uploaded_files:
-        override = kecamatan_override_map.get(f.name) or cari_kecamatan_dari_nama_file(f.name)
+        tebakan = cari_kecamatan_dari_nama_file(f.name)
+        override = kecamatan_override_map.get(f.name) or tebakan
         hasil, err = _baca_satu_file_meteo(f, kecamatan_override=override)
         if err:
             pesan.append(err)
             continue
         semua_hasil.append(hasil)
 
-    kolom = ["kecamatan", "lat", "lon", "curah_hujan_mm_hari", "kategori_intensitas",
-             "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
+    kolom_kosong = ["kecamatan", "lat", "lon", "curah_hujan_mm_hari", "kategori_intensitas",
+                    "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
     if not semua_hasil:
-        return pd.DataFrame(columns=kolom), pesan
+        return pd.DataFrame(columns=kolom_kosong), pesan
 
     gabungan = pd.concat(semua_hasil, ignore_index=True)
 
     duplikat = sorted(gabungan["kecamatan"][gabungan["kecamatan"].duplicated()].unique())
     if duplikat:
         pesan.append(
-            "Kecamatan ini ada di lebih dari satu file meteorologi, nilainya dirata-ratakan: "
-            + ", ".join(duplikat)
+            "Kecamatan berikut muncul di lebih dari satu file meteorologi — nilainya "
+            "dirata-ratakan antar file: " + ", ".join(duplikat)
         )
     gabungan = gabungan.groupby("kecamatan", as_index=False).mean(numeric_only=True)
 
-    dikenal = set(_KEC_LOOKUP.values())
-    tidak_dikenal = sorted(set(gabungan["kecamatan"]) - dikenal)
+    kecamatan_dikenal = set(_KECAMATAN_NORM_LOOKUP.values())
+    tidak_dikenal = sorted(set(gabungan["kecamatan"]) - kecamatan_dikenal)
     if tidak_dikenal:
         pesan.append(
-            "Kecamatan ini tidak cocok dengan daftar 40 kecamatan dan diabaikan: "
-            + ", ".join(tidak_dikenal)
+            "Kecamatan berikut (dari file meteorologi) tidak cocok dengan daftar 40 "
+            "kecamatan Kabupaten Bogor, sehingga diabaikan: " + ", ".join(tidak_dikenal)
         )
-        gabungan = gabungan[gabungan["kecamatan"].isin(dikenal)]
+        gabungan = gabungan[gabungan["kecamatan"].isin(kecamatan_dikenal)]
 
     if gabungan.empty:
-        return pd.DataFrame(columns=kolom), pesan
+        return pd.DataFrame(columns=kolom_kosong), pesan
 
-    koordinat = {k["n"]: (k["lat"], k["lon"]) for k in KECAMATAN_BOGOR}
-    gabungan["lat"] = gabungan["kecamatan"].map(lambda k: koordinat[k][0])
-    gabungan["lon"] = gabungan["kecamatan"].map(lambda k: koordinat[k][1])
+    lookup_koordinat = {k["n"]: (k["lat"], k["lon"]) for k in KECAMATAN_BOGOR}
+    gabungan["lat"] = gabungan["kecamatan"].map(lambda k: lookup_koordinat[k][0])
+    gabungan["lon"] = gabungan["kecamatan"].map(lambda k: lookup_koordinat[k][1])
     gabungan["kategori_intensitas"] = gabungan["curah_hujan_mm_hari"].apply(klasifikasi_curah_hujan)
-    return gabungan[kolom].reset_index(drop=True), pesan
+
+    return gabungan[kolom_kosong].reset_index(drop=True), pesan
 
 
-def compute_risk_index(df_events, df_meteo, daftar_kecamatan):
-    """Indeks risiko sederhana 0-100 per kecamatan:
-    45% jumlah kejadian + 30% rata-rata keparahan + 25% curah hujan
-    (masing-masing dinormalisasi min-max). Bukan IRBI resmi."""
+def compute_risk_index(df_events: pd.DataFrame, df_meteo: pd.DataFrame, daftar_kecamatan) -> pd.DataFrame:
+    """Indeks risiko komposit SEDERHANA per kecamatan (0-100): gabungan
+    jumlah kejadian, rata-rata keparahan, dan curah hujan rata-rata.
+    Dihitung HANYA untuk `daftar_kecamatan` (kecamatan yang punya data
+    kejadian bencana *dan* data meteorologi — lihat `kecamatan_aktif` di
+    bagian 5), bukan otomatis 40 kecamatan.
+    BUKAN metodologi IRBI resmi BNPB — ganti dengan formula kajian
+    risiko (bahaya x kerentanan x kapasitas) untuk analisis ilmiah."""
     agg = (
         df_events.groupby("kecamatan")
         .agg(jumlah_kejadian=("kecamatan", "size"), rata_keparahan=("keparahan", "mean"))
@@ -571,8 +807,8 @@ def compute_risk_index(df_events, df_meteo, daftar_kecamatan):
     out = out.merge(df_meteo[["kecamatan", "curah_hujan_mm_hari"]], on="kecamatan", how="left")
 
     def norm(s):
-        selisih = s.max() - s.min()
-        return (s - s.min()) / selisih if selisih and selisih > 0 else s * 0
+        rng_ = s.max() - s.min()
+        return (s - s.min()) / rng_ if rng_ and rng_ > 0 else s * 0
 
     out["indeks_risiko"] = (
         0.45 * norm(out["jumlah_kejadian"])
@@ -586,24 +822,171 @@ def compute_risk_index(df_events, df_meteo, daftar_kecamatan):
     return out
 
 
-# ---------------------------------------------------------------
-# Data kejadian bencana
-# ---------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 3.5 HOVER METEOROLOGI DI TITIK PETA & INTERPRETASI KEJADIAN x METEOROLOGI
+# ---------------------------------------------------------------------------
+# Catatan penting: nilai meteorologi yang ditampilkan adalah RATA-RATA PER
+# KECAMATAN dari file yang diunggah, bukan nilai pada hari kejadian. Jadi
+# interpretasi bersifat membandingkan kondisi umum kecamatan dengan rata-rata
+# kecamatan lain, bukan membuktikan sebab-akibat.
+
+
+def _ada(v) -> bool:
+    return v is not None and not pd.isna(v)
+
+
+def teks_hover_titik(r, dengan_meteo: bool) -> str:
+    """Teks hover (HTML sederhana) satu titik kejadian."""
+    desa = escape(str(r.get("desa", DESA_KOSONG)))
+    baris = [
+        f"<b>{escape(str(r['jenis_bencana']))}</b>",
+        f"Tanggal: {r['tanggal'].strftime('%d %b %Y')}",
+        f"Desa/Kel.: {desa}",
+        f"Kecamatan: {escape(str(r['kecamatan']))}",
+    ]
+    if dengan_meteo:
+        baris.append("<i>Meteorologi kecamatan (rata-rata):</i>")
+        if _ada(r.get("curah_hujan_mm_hari")):
+            kat = r.get("kategori_intensitas")
+            kat_txt = f" ({kat})" if isinstance(kat, str) else ""
+            baris.append(f"Curah hujan: {r['curah_hujan_mm_hari']:.1f} mm/hari{kat_txt}")
+        if _ada(r.get("suhu_c")):
+            baris.append(f"Suhu: {r['suhu_c']:.1f} °C")
+        if _ada(r.get("kelembaban_persen")):
+            baris.append(f"Kelembaban: {r['kelembaban_persen']:.0f} %")
+        if _ada(r.get("kecepatan_angin_kmh")):
+            baris.append(f"Angin: {r['kecepatan_angin_kmh']:.1f} km/jam")
+    return "<br>".join(baris)
+
+
+def _batas(rata_v: float, minimum: float) -> float:
+    return max(minimum, 0.10 * abs(rata_v))
+
+
+def bandingkan(nilai: float, rata: float, selisih_min: float) -> str:
+    """'di atas' / 'di bawah' / 'setara' dibanding rata-rata."""
+    if not (_ada(nilai) and _ada(rata)):
+        return "tidak diketahui"
+    if nilai > rata + selisih_min:
+        return "di atas"
+    if nilai < rata - selisih_min:
+        return "di bawah"
+    return "setara"
+
+
+def posisi_meteo(m, rata) -> dict:
+    """Posisi tiap parameter meteorologi kecamatan terhadap rata-rata
+    seluruh kecamatan aktif."""
+    return {
+        "hujan": bandingkan(m["curah_hujan_mm_hari"], rata["curah_hujan_mm_hari"], _batas(rata["curah_hujan_mm_hari"], 1.0)),
+        "suhu": bandingkan(m["suhu_c"], rata["suhu_c"], 0.5),
+        "lembab": bandingkan(m["kelembaban_persen"], rata["kelembaban_persen"], 2.0),
+        "angin": bandingkan(m["kecepatan_angin_kmh"], rata["kecepatan_angin_kmh"], _batas(rata["kecepatan_angin_kmh"], 1.0)),
+    }
+
+
+def kalimat_per_jenis(jenis: str, jumlah: int, pos: dict) -> str:
+    """Satu kalimat interpretasi untuk satu jenis bencana."""
+    pemicu = PEMICU_METEO.get(jenis)
+    if pemicu == "hujan":
+        if pos["hujan"] == "di atas":
+            return (f"**{jenis}** ({jumlah} kejadian): curah hujan kecamatan ini di atas rata-rata, "
+                    "sejalan dengan hujan sebagai pemicu utama jenis bencana ini.")
+        if pos["hujan"] == "di bawah":
+            return (f"**{jenis}** ({jumlah} kejadian): curah hujan rata-rata kecamatan ini di bawah rata-rata, "
+                    "sehingga kejadiannya kemungkinan lebih dipengaruhi faktor lokal (topografi, tata guna lahan, "
+                    "drainase) atau hujan ekstrem sesaat yang tidak tertangkap rata-rata.")
+        return (f"**{jenis}** ({jumlah} kejadian): curah hujan kecamatan ini setara rata-rata; hubungannya "
+                "dengan kejadian belum tampak menonjol dari data rata-rata.")
+    if pemicu == "angin":
+        if pos["angin"] == "di atas":
+            return (f"**{jenis}** ({jumlah} kejadian): kecepatan angin rata-rata kecamatan ini di atas rata-rata, "
+                    "sejalan dengan kejadian angin kencang.")
+        if pos["angin"] == "di bawah":
+            return (f"**{jenis}** ({jumlah} kejadian): kecepatan angin rata-rata kecamatan ini di bawah rata-rata; "
+                    "angin kencang biasanya bersifat sesaat (mis. saat hujan lebat) sehingga tidak tampak pada rata-rata.")
+        return (f"**{jenis}** ({jumlah} kejadian): kecepatan angin rata-rata setara rata-rata kecamatan lain.")
+    if pemicu == "kering":
+        ciri = []
+        if pos["hujan"] == "di bawah":
+            ciri.append("curah hujan di bawah rata-rata")
+        if pos["suhu"] == "di atas":
+            ciri.append("suhu di atas rata-rata")
+        if pos["lembab"] == "di bawah":
+            ciri.append("kelembaban di bawah rata-rata")
+        if ciri:
+            return (f"**{jenis}** ({jumlah} kejadian): kondisi kecamatan ini cenderung kering ("
+                    + ", ".join(ciri) + "), sejalan dengan jenis bencana ini.")
+        return (f"**{jenis}** ({jumlah} kejadian): kondisi kecamatan ini belum menunjukkan ciri kering "
+                "yang menonjol dibanding kecamatan lain.")
+    return f"**{jenis}** ({jumlah} kejadian): jenis bencana ini tidak dikaitkan langsung dengan parameter cuaca."
+
+
+def susun_interpretasi(df_kec, nama_kec, m, rata, rank, total) -> list:
+    """Daftar kalimat markdown. `m` = baris meteo kecamatan (atau None bila
+    meteo belum diunggah), `rata` = rata-rata meteo seluruh kecamatan aktif,
+    `rank` = peringkat curah hujan kecamatan (1 = tertinggi)."""
+    out = []
+    n = len(df_kec)
+    jenis_hit = df_kec["jenis_bencana"].value_counts()
+    top = ", ".join(f"{j} ({c})" for j, c in jenis_hit.head(3).items())
+    out.append(f"Kecamatan **{nama_kec}** mencatat **{n} kejadian** pada periode/filter terpilih. Terbanyak: {top}.")
+
+    desa_hit = df_kec.loc[df_kec["desa"] != DESA_KOSONG, "desa"].value_counts()
+    if len(desa_hit):
+        out.append("Desa/kelurahan dengan kejadian terbanyak: "
+                   + ", ".join(f"{d} ({c})" for d, c in desa_hit.head(3).items()) + ".")
+    else:
+        out.append("Nama desa/kelurahan tidak tercatat pada data kejadian.")
+
+    if m is None:
+        out.append("Data meteorologi belum diunggah, sehingga hubungan dengan cuaca belum bisa diinterpretasikan.")
+        return out
+
+    out.append(
+        f"Meteorologi rata-rata kecamatan: curah hujan {m['curah_hujan_mm_hari']:.1f} mm/hari "
+        f"({m['kategori_intensitas']}), suhu {m['suhu_c']:.1f} °C, kelembaban {m['kelembaban_persen']:.0f}%, "
+        f"angin {m['kecepatan_angin_kmh']:.1f} km/jam."
+    )
+    if rank is not None:
+        out.append(f"Curah hujan kecamatan ini peringkat **{rank} dari {total}** kecamatan pada data meteorologi (1 = tertinggi).")
+
+    pos = posisi_meteo(m, rata)
+    for jenis, c in jenis_hit.items():
+        out.append(kalimat_per_jenis(jenis, int(c), pos))
+
+    out.append("*Catatan: nilai meteorologi adalah rata-rata per kecamatan dari file yang diunggah, bukan nilai "
+               "pada hari kejadian, dan perbandingannya bersifat deskriptif — bukan bukti sebab-akibat. "
+               "Untuk analisis yang lebih tajam gunakan data harian yang dicocokkan dengan tanggal kejadian.*")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 4. PEMUATAN DATA KEJADIAN BENCANA
+# ---------------------------------------------------------------------------
 
 
 def _cari_baris_header(uploaded_file):
-    """Cari baris header di 5 baris pertama (ada KECAMATAN dan BANJIR)."""
+    """Mencari indeks baris header pada CSV format BPBD (melewati baris
+    judul di baris pertama bila ada). Header dikenali dari keberadaan
+    kolom KECAMATAN dan BANJIR pada baris yang sama."""
     uploaded_file.seek(0)
     preview = pd.read_csv(uploaded_file, header=None, nrows=5, dtype=str)
     for i in range(len(preview)):
-        nilai = set(str(v).strip().upper() for v in preview.iloc[i].tolist())
-        if "KECAMATAN" in nilai and "BANJIR" in nilai:
+        nilai_baris = set(str(v).strip().upper() for v in preview.iloc[i].tolist())
+        if "KECAMATAN" in nilai_baris and "BANJIR" in nilai_baris:
             return i
     return None
 
 
 def _parse_format_bpbd(uploaded_file):
-    """Parse CSV format laporan BPBD. Return None kalau bukan format ini."""
+    """Mem-parse CSV format asli BPBD Kabupaten Bogor. Mengembalikan
+    None kalau file tidak cocok format ini (supaya load_data() bisa
+    mencoba format lain).
+
+    Hasilnya membawa kolom bantu `_dampak_score` (skor dampak mentah)
+    supaya load_data() bisa menghitung ulang `keparahan` dengan skala
+    gabungan kalau ada lebih dari satu file."""
     header_idx = _cari_baris_header(uploaded_file)
     if header_idx is None:
         return None
@@ -622,24 +1005,24 @@ def _parse_format_bpbd(uploaded_file):
             return pd.to_numeric(df_raw[col_lookup[key]], errors="coerce").fillna(0)
         return pd.Series(0, index=df_raw.index)
 
-    # 8 kolom jenis bencana -> 1 kolom
+    # --- jenis bencana dari 8 kolom biner ---
     ind_df = pd.DataFrame(index=df_raw.index)
     for raw_key, display in TYPE_COLUMN_MAP.items():
         if raw_key in col_lookup:
             ind_df[display] = pd.to_numeric(df_raw[col_lookup[raw_key]], errors="coerce").fillna(0)
     if ind_df.shape[1] == 0:
-        return None
-    ada_jenis = ind_df.sum(axis=1) > 0
-    jenis = ind_df.idxmax(axis=1).where(ada_jenis, "Tidak Diketahui")
+        return None  # tidak ada satupun kolom jenis bencana ditemukan -> bukan format ini
+    has_any = ind_df.sum(axis=1) > 0
+    jenis = ind_df.idxmax(axis=1).where(has_any, "Tidak Diketahui")
 
-    # tanggal (M/D/YYYY, kalau gagal pakai parser umum)
+    # --- tanggal (format M/D/YYYY, dengan fallback parser umum) ---
     tanggal_col = col_lookup["TANGGAL KEJADIAN"]
     tanggal = pd.to_datetime(df_raw[tanggal_col], format="%m/%d/%Y", errors="coerce")
-    gagal = tanggal.isna() & df_raw[tanggal_col].notna()
-    if gagal.any():
-        tanggal.loc[gagal] = pd.to_datetime(df_raw.loc[gagal, tanggal_col], errors="coerce")
+    mask_gagal = tanggal.isna() & df_raw[tanggal_col].notna()
+    if mask_gagal.any():
+        tanggal.loc[mask_gagal] = pd.to_datetime(df_raw.loc[mask_gagal, tanggal_col], errors="coerce")
 
-    # koordinat
+    # --- koordinat ---
     lon_col = col_lookup.get("LONGITUDE")
     lat_col = col_lookup.get("LATITUDE")
     lon_parsed = df_raw[lon_col].apply(lambda v: parse_koordinat(v, "lon")) if lon_col else pd.Series(np.nan, index=df_raw.index)
@@ -648,12 +1031,12 @@ def _parse_format_bpbd(uploaded_file):
     lon_parsed[tidak_valid] = np.nan
     lat_parsed[tidak_valid] = np.nan
 
-    # dampak
+    # --- dampak: korban & rumah ---
     meninggal = col_num("MENINGGAL DUNIA (JIWA)")
     luka_berat = col_num("LUKA BERAT (JIWA)")
     luka_sedang = col_num("LUKA SEDANG (JIWA)")
     luka_ringan = col_num("LUKA RINGAN (JIWA)")
-    mengungsi = col_num("MENGUNGSI (JIWA)")
+    mengungsi_jiwa = col_num("MENGUNGSI (JIWA)")
     rumah_ringan = col_num("RUMAH RUSAK RINGAN")
     rumah_sedang = col_num("RUMAH RUSAK SEDANG")
     rumah_berat = col_num("RUMAH RUSAK BERAT")
@@ -661,12 +1044,12 @@ def _parse_format_bpbd(uploaded_file):
     rumah_terendam = col_num("RUMAH TERENDAM")
     rumah_terdampak = rumah_ringan + rumah_sedang + rumah_berat + rumah_terancam + rumah_terendam
 
-    # skor dampak -> keparahan 1-5 (skala log)
+    # --- keparahan: proksi 1-5 dari kombinasi dampak (lihat catatan di atas file) ---
     dampak_score = (
         meninggal * 5 + luka_berat * 3 + luka_sedang * 2 + luka_ringan * 1
         + rumah_berat * 2 + rumah_sedang * 1 + rumah_ringan * 0.5
         + rumah_terendam * 0.5 + rumah_terancam * 0.3
-        + mengungsi * 0.02
+        + mengungsi_jiwa * 0.02
     )
     max_score = dampak_score.max()
     if max_score > 0:
@@ -674,7 +1057,7 @@ def _parse_format_bpbd(uploaded_file):
     else:
         keparahan = pd.Series(1.0, index=df_raw.index)
 
-    # status darurat
+    # --- status (normalisasi + perbaikan salah ketik umum) ---
     status_key = "STATUS KEADAAN DARURAT BENCANA"
     if status_key in col_lookup:
         status = df_raw[col_lookup[status_key]].fillna("Tidak Diketahui").astype(str).str.strip().str.upper()
@@ -683,15 +1066,26 @@ def _parse_format_bpbd(uploaded_file):
     else:
         status = pd.Series("Tidak Diketahui", index=df_raw.index)
 
+    # --- desa/kelurahan (kolom "DESA / KELURAHAN", opsional) ---
+    desa_key = next((k for k in col_lookup if k.startswith("DESA")), None)
+    if desa_key:
+        desa = (
+            df_raw[col_lookup[desa_key]].fillna("").astype(str).str.strip()
+            .replace({"": DESA_KOSONG, "nan": DESA_KOSONG, "-": DESA_KOSONG})
+        )
+    else:
+        desa = pd.Series(DESA_KOSONG, index=df_raw.index)
+
     hasil = pd.DataFrame(
         {
             "tanggal": tanggal,
             "jenis_bencana": jenis,
             "kecamatan": df_raw[col_lookup["KECAMATAN"]].astype(str).str.strip(),
+            "desa": desa,
             "lat": lat_parsed,
             "lon": lon_parsed,
             "meninggal": meninggal.astype(int),
-            "mengungsi": mengungsi.astype(int),
+            "mengungsi": mengungsi_jiwa.astype(int),
             "rumah_terdampak": rumah_terdampak.astype(int),
             "keparahan": keparahan.round(1),
             "status": status,
@@ -699,11 +1093,13 @@ def _parse_format_bpbd(uploaded_file):
         }
     )
     hasil = hasil.dropna(subset=["tanggal", "kecamatan"])
-    return isi_koordinat_otomatis(hasil)
+    hasil = isi_koordinat_otomatis(hasil)
+    return hasil
 
 
 def _parse_format_sederhana(uploaded_file):
-    """Format sederhana: kolom tanggal, jenis_bencana, kecamatan wajib ada."""
+    """Mem-parse CSV format sederhana (skema lama): tanggal, jenis_bencana,
+    kecamatan wajib ada; lat/lon dan kolom dampak opsional."""
     uploaded_file.seek(0)
     try:
         df_csv = pd.read_csv(uploaded_file, parse_dates=["tanggal"])
@@ -715,16 +1111,25 @@ def _parse_format_sederhana(uploaded_file):
     df_csv = isi_koordinat_otomatis(df_csv)
     for kol, default in [
         ("meninggal", 0), ("mengungsi", 0), ("rumah_terdampak", 0),
-        ("keparahan", 2.5), ("status", "Tidak Diketahui"),
+        ("keparahan", 2.5), ("status", "Tidak Diketahui"), ("desa", DESA_KOSONG),
     ]:
         if kol not in df_csv.columns:
             df_csv[kol] = default
     return df_csv
 
 
-def load_data(uploaded_files):
-    """Muat data kejadian bencana. Tiap file dicoba sebagai format BPBD,
-    lalu format sederhana. Kalau tidak ada yang cocok, pakai data simulasi."""
+def load_data(uploaded_files) -> pd.DataFrame:
+    """Titik masuk data kejadian bencana. `uploaded_files` adalah daftar
+    file CSV (boleh kosong, satu file, banyak file, atau isi satu folder).
+    Tiap file:
+    1) dicoba sebagai format asli BPBD Kabupaten Bogor,
+    2) kalau gagal, dicoba sebagai format sederhana,
+    3) kalau keduanya gagal, dilewati (dengan pesan di sidebar).
+    Semua file yang berhasil dibaca digabung jadi satu tabel. Untuk data
+    format BPBD, `keparahan` dihitung ulang dengan skala GABUNGAN seluruh
+    file, supaya nilainya sebanding antar-file (mis. antar-bulan).
+    Kalau tidak ada file, atau tidak satu pun dikenali, dashboard memakai
+    data simulasi."""
     if not uploaded_files:
         return generate_dummy_data()
 
@@ -744,17 +1149,26 @@ def load_data(uploaded_files):
         bagian.append(hasil)
 
     if dilewati:
-        st.sidebar.warning("File kejadian bencana ini formatnya tidak dikenali dan dilewati: " + ", ".join(dilewati))
+        st.sidebar.warning(
+            "File kejadian bencana berikut formatnya tidak dikenali sehingga dilewati: "
+            + ", ".join(dilewati)
+        )
     if not bagian:
         st.sidebar.error(
-            "Tidak ada file kejadian bencana yang formatnya dikenali. Pakai format laporan BPBD "
-            "atau kolom tanggal, jenis_bencana, kecamatan. Sementara ditampilkan data simulasi."
+            "Tidak ada file kejadian bencana yang formatnya dikenali. Pastikan file "
+            "memakai format laporan BPBD Kabupaten Bogor, atau skema sederhana (kolom "
+            "tanggal, jenis_bencana, kecamatan). Menampilkan data simulasi sementara."
         )
         return generate_dummy_data()
 
     gabungan = pd.concat(bagian, ignore_index=True)
+    if "desa" not in gabungan.columns:
+        gabungan["desa"] = DESA_KOSONG
+    gabungan["desa"] = (
+        gabungan["desa"].fillna(DESA_KOSONG).astype(str).str.strip()
+        .replace({"": DESA_KOSONG, "nan": DESA_KOSONG, "-": DESA_KOSONG})
+    )
 
-    # hitung ulang keparahan pakai skala gabungan semua file
     if "_dampak_score" in gabungan.columns:
         skor = gabungan["_dampak_score"]
         ada = skor.notna()
@@ -771,42 +1185,72 @@ def load_data(uploaded_files):
     return gabungan.sort_values("tanggal", ascending=False).reset_index(drop=True)
 
 
-# ---------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 5. SIDEBAR: UNGGAH FILE, OVERRIDE KECAMATAN, IRISAN KECAMATAN AKTIF, FILTER
+# ---------------------------------------------------------------------------
 
 BANTUAN_BENCANA = (
-    "Bisa format laporan BPBD Kabupaten Bogor atau format sederhana (kolom tanggal, "
-    "jenis_bencana, kecamatan). Boleh lebih dari satu file. Kosongkan untuk memakai data simulasi."
+    "Mendukung format asli laporan BPBD Kabupaten Bogor (terdeteksi otomatis) maupun "
+    "format sederhana (kolom tanggal, jenis_bencana, kecamatan). Boleh lebih dari satu "
+    "file (mis. satu file per bulan) — semuanya digabung. Kosongkan untuk memakai "
+    "data simulasi."
 )
+
 BANTUAN_METEO = (
-    "Satu file bisa berisi satu kecamatan (nama dari nama file, mis. cibinong.csv) atau "
-    "banyak kecamatan (butuh kolom kecamatan). Nama kolom curah hujan fleksibel "
-    "(\"curah hujan\", \"ch\", \"rr\", dst). Kecamatan yang tidak ada di data meteorologi "
-    "tidak ditampilkan."
+    "Tiap file boleh berisi satu kecamatan (nama kecamatan dikenali dari nama "
+    "filenya, mis. \"cibinong.csv\", atau dari kolom kecamatan di dalam file) atau "
+    "beberapa kecamatan sekaligus (butuh kolom kecamatan). Nama kolom fleksibel: "
+    "\"curah hujan\", \"ch\", \"rr\", \"curah_hujan_mm_hari\" semua dikenali. "
+    "Pemisah kolom (koma/titik koma) dan format angka desimal (titik/koma) "
+    "terdeteksi otomatis. Kecamatan yang tidak tercakup di data meteorologi "
+    "tidak akan tampil di dashboard."
 )
 
 
 def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadangan, bantuan):
-    """Widget unggah CSV: pilih file (bisa banyak) atau pilih folder."""
-    mode = st.radio(label_mode, ["Pilih file CSV", "Pilih folder"], horizontal=True, key=f"mode_unggah_{kunci}")
+    """Widget sidebar untuk mengunggah data CSV dengan DUA pilihan cara:
+    'Pilih file CSV' (satu atau banyak file sekaligus) atau 'Pilih folder'
+    (semua CSV di dalam satu folder). Dipakai sama persis untuk data
+    kejadian bencana dan data meteorologi.
+
+    Mode "directory" pada st.file_uploader membuka dialog pilih-folder dan
+    hanya bisa memilih folder (bukan file satuan), makanya dibuat dua mode
+    terpisah lewat radio. Mengembalikan daftar file (kosong kalau belum
+    ada yang diunggah)."""
+    mode = st.radio(
+        label_mode,
+        ["Pilih file CSV", "Pilih folder"],
+        horizontal=True,
+        key=f"mode_unggah_{kunci}",
+    )
     if mode == "Pilih folder":
         try:
             files = st.file_uploader(
-                label_folder, type=["csv"], accept_multiple_files="directory",
+                label_folder,
+                type=["csv"],
+                accept_multiple_files="directory",
                 key=f"{kunci}_folder",
-                help="Pilih satu folder, semua CSV di dalamnya ikut terunggah. " + bantuan,
+                help="Pilih SATU FOLDER; semua file CSV di dalamnya ikut terunggah. " + bantuan,
             )
         except Exception:
-            st.warning("Versi Streamlit ini belum mendukung unggah folder. Pilih beberapa file CSV saja.")
+            st.warning(
+                "Versi Streamlit ini belum mendukung unggah folder. Pilih beberapa "
+                "file CSV sekaligus di bawah ini."
+            )
             files = st.file_uploader(
-                label_cadangan, type=["csv"], accept_multiple_files=True,
-                key=f"{kunci}_file_cadangan", help=bantuan,
+                label_cadangan,
+                type=["csv"],
+                accept_multiple_files=True,
+                key=f"{kunci}_file_cadangan",
+                help=bantuan,
             )
     else:
         files = st.file_uploader(
-            label_file, type=["csv"], accept_multiple_files=True,
-            key=f"{kunci}_file", help=bantuan,
+            label_file,
+            type=["csv"],
+            accept_multiple_files=True,
+            key=f"{kunci}_file",
+            help=bantuan,
         )
     return files or []
 
@@ -817,9 +1261,9 @@ with st.sidebar:
     uploaded_bencana_files = widget_unggah_csv(
         "bencana",
         label_mode="Cara unggah data kejadian bencana",
-        label_file="Unggah CSV kejadian bencana (boleh lebih dari satu file)",
-        label_folder="Unggah folder berisi CSV kejadian bencana",
-        label_cadangan="Unggah CSV kejadian bencana (boleh lebih dari satu file)",
+        label_file="Unggah CSV data kejadian bencana (boleh lebih dari satu file — mis. satu per bulan)",
+        label_folder="Unggah folder berisi CSV data kejadian bencana",
+        label_cadangan="Unggah CSV data kejadian bencana (boleh lebih dari satu file)",
         bantuan=BANTUAN_BENCANA,
     )
 
@@ -828,27 +1272,27 @@ with st.sidebar:
     uploaded_meteo_files = widget_unggah_csv(
         "meteo",
         label_mode="Cara unggah data meteorologi",
-        label_file="Unggah CSV meteorologi (satu per kecamatan atau gabungan)",
-        label_folder="Unggah folder berisi CSV meteorologi",
-        label_cadangan="Unggah CSV meteorologi (boleh lebih dari satu file)",
+        label_file="Unggah CSV data meteorologi (boleh lebih dari satu file — satu per kecamatan, atau gabungan)",
+        label_folder="Unggah folder berisi CSV data meteorologi (satu per kecamatan, atau gabungan)",
+        label_cadangan="Unggah CSV data meteorologi (boleh lebih dari satu file)",
         bantuan=BANTUAN_METEO,
     )
 
     ada_data_bencana = len(uploaded_bencana_files) > 0
     ada_data_meteo = len(uploaded_meteo_files) > 0
 
-    # file meteorologi yang kecamatannya tidak terbaca: pilih manual
     kecamatan_override_map = {}
     if uploaded_meteo_files:
         file_perlu_override = [f for f in uploaded_meteo_files if _perlu_pilih_manual_kecamatan(f)]
         if file_perlu_override:
-            st.caption("Kecamatan tidak terbaca otomatis untuk file berikut, pilih manual:")
+            st.caption("Nama kecamatan tidak terbaca otomatis untuk file berikut — pilih manual:")
             for f in file_perlu_override:
-                kecamatan_override_map[f.name] = st.selectbox(
+                pilihan = st.selectbox(
                     f"Kecamatan untuk `{f.name}`",
                     [k["n"] for k in KECAMATAN_BOGOR],
                     key=f"override_kec_{f.name}",
                 )
+                kecamatan_override_map[f.name] = pilihan
 
     st.markdown("---")
     st.markdown("### Filter")
@@ -860,7 +1304,10 @@ with st.sidebar:
         for p in pesan_meteo:
             st.warning(p)
         if df_meteo_real.empty:
-            st.error("Tidak ada data meteorologi valid dari file yang diunggah. Dipakai data simulasi untuk 40 kecamatan.")
+            st.error(
+                "Tidak ada data meteorologi valid yang bisa dipakai dari file yang "
+                "diunggah. Memakai data simulasi penuh untuk 40 kecamatan."
+            )
             df_meteo = generate_meteo_data()
             meteo_dari_file = False
         else:
@@ -870,25 +1317,26 @@ with st.sidebar:
         df_meteo = generate_meteo_data()
         meteo_dari_file = False
 
-    # hanya kecamatan yang punya data bencana DAN meteorologi
-    kec_bencana = set(df_all["kecamatan"].unique())
-    kec_meteo = set(df_meteo["kecamatan"].unique())
-    kecamatan_aktif = sorted(kec_bencana & kec_meteo)
+    # --- irisan kecamatan: hanya tampilkan kecamatan yang punya data
+    # kejadian bencana DAN data meteorologi sekaligus ---
+    kecamatan_bencana_set = set(df_all["kecamatan"].unique())
+    kecamatan_meteo_set = set(df_meteo["kecamatan"].unique())
+    kecamatan_aktif = sorted(kecamatan_bencana_set & kecamatan_meteo_set)
 
     if meteo_dari_file:
-        hanya_bencana = sorted(kec_bencana - kec_meteo)
-        hanya_meteo = sorted(kec_meteo - kec_bencana)
+        hanya_bencana = sorted(kecamatan_bencana_set - kecamatan_meteo_set)
+        hanya_meteo = sorted(kecamatan_meteo_set - kecamatan_bencana_set)
         if hanya_bencana:
             st.info(
-                f"{len(hanya_bencana)} kecamatan punya data bencana tapi belum ada data meteorologi, "
-                "jadi tidak ditampilkan: " + ", ".join(hanya_bencana)
+                f"{len(hanya_bencana)} kecamatan punya data kejadian bencana tapi belum "
+                "ada data meteorologinya, sehingga tidak ditampilkan: " + ", ".join(hanya_bencana)
             )
         if hanya_meteo:
             st.info(
-                f"{len(hanya_meteo)} kecamatan punya data meteorologi tapi tidak ada data bencana, "
-                "jadi tidak ditampilkan: " + ", ".join(hanya_meteo)
+                f"{len(hanya_meteo)} kecamatan di data meteorologi tidak punya data "
+                "kejadian bencana yang cocok, sehingga tidak ditampilkan: " + ", ".join(hanya_meteo)
             )
-        st.caption(f"✅ {len(kecamatan_aktif)} kecamatan aktif (data bencana dan meteorologi lengkap).")
+        st.caption(f"✅ {len(kecamatan_aktif)} kecamatan aktif: data lengkap (bencana + meteorologi).")
 
     df_all = df_all[df_all["kecamatan"].isin(kecamatan_aktif)].reset_index(drop=True)
     df_meteo = df_meteo[df_meteo["kecamatan"].isin(kecamatan_aktif)].reset_index(drop=True)
@@ -896,32 +1344,45 @@ with st.sidebar:
     tahun_opsi = sorted(df_all["tanggal"].dt.year.unique(), reverse=True) if not df_all.empty else []
     tahun_pilih = st.multiselect("Tahun", tahun_opsi, default=tahun_opsi)
 
-    # opsi bulan menyesuaikan tahun yang dipilih
-    df_untuk_bulan = df_all[df_all["tanggal"].dt.year.isin(tahun_pilih)] if tahun_pilih else df_all
-    bulan_tersedia = sorted(df_untuk_bulan["tanggal"].dt.month.unique())
+    NAMA_BULAN = {
+        1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
+        7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember",
+    }
+    # Opsi bulan hanya diambil dari data pada tahun yang sedang dipilih, supaya
+    # daftar bulannya relevan (mis. kalau data 2026 baru sampai September,
+    # bulan Oktober-Desember tidak muncul di daftar).
+    df_untuk_opsi_bulan = df_all[df_all["tanggal"].dt.year.isin(tahun_pilih)] if tahun_pilih else df_all
+    bulan_angka_tersedia = sorted(df_untuk_opsi_bulan["tanggal"].dt.month.unique())
+    bulan_opsi = [NAMA_BULAN[b] for b in bulan_angka_tersedia]
     bulan_pilih_nama = st.multiselect(
-        "Bulan", [NAMA_BULAN[b] for b in bulan_tersedia], default=[], placeholder="Semua bulan"
+        "Bulan", bulan_opsi, default=[], placeholder="Semua bulan"
     )
-    nama_ke_angka = {v: k for k, v in NAMA_BULAN.items()}
-    bulan_pilih_angka = [nama_ke_angka[b] for b in bulan_pilih_nama]
+    NAMA_KE_ANGKA_BULAN = {v: k for k, v in NAMA_BULAN.items()}
+    bulan_pilih_angka = [NAMA_KE_ANGKA_BULAN[b] for b in bulan_pilih_nama]
 
     jenis_opsi = sorted(df_all["jenis_bencana"].unique())
     jenis_pilih = st.multiselect("Jenis bencana", jenis_opsi, default=jenis_opsi)
 
     kecamatan_opsi = sorted(df_all["kecamatan"].unique())
-    kecamatan_pilih = st.multiselect("Kecamatan", kecamatan_opsi, default=[], placeholder="Semua kecamatan")
+    kecamatan_pilih = st.multiselect(
+        "Kecamatan", kecamatan_opsi, default=[], placeholder="Semua kecamatan"
+    )
 
     st.markdown("---")
-    st.caption("Prototipe Departemen Geofisika dan Meteorologi, IPB University. Cakupan: Kabupaten Bogor.")
+    st.caption(
+        "Prototipe untuk Departemen Geofisika dan Meteorologi, IPB "
+        "University. Cakupan: Kabupaten Bogor."
+    )
 
 if not kecamatan_aktif:
     st.error(
-        "Tidak ada kecamatan yang punya data bencana dan data meteorologi sekaligus. "
-        "Cek nama kecamatan di kedua file, atau kosongkan salah satu untuk memakai data simulasi."
+        "Tidak ada kecamatan yang punya data kejadian bencana DAN data meteorologi "
+        "sekaligus, sehingga dashboard tidak bisa ditampilkan. Periksa kecocokan nama "
+        "kecamatan antara file kejadian bencana dan file meteorologi di sidebar "
+        "(atau kosongkan salah satunya untuk memakai data simulasi)."
     )
     st.stop()
 
-# terapkan filter
 df = df_all[df_all["tanggal"].dt.year.isin(tahun_pilih) & df_all["jenis_bencana"].isin(jenis_pilih)]
 if bulan_pilih_angka:
     df = df[df["tanggal"].dt.month.isin(bulan_pilih_angka)]
@@ -930,16 +1391,25 @@ if kecamatan_pilih:
 
 df_risk = compute_risk_index(df, df_meteo, kecamatan_aktif)
 
-# ---------------------------------------------------------------
-# Logo, halaman Home, peta analisis
-# ---------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 5.5 BAR LOGO (kanan atas, sejajar tab), HALAMAN HOME & PETA ANALISIS 2026
+# ---------------------------------------------------------------------------
 
 
-def html_logo_bar():
-    """Logo IPB, BPBD, BMKG dari folder logos/ (png/jpg). Yang tidak ada dilewati."""
+def html_logo_bar() -> str:
+    """Membuat bar logo (IPB, BPBD, BMKG) sebagai HTML dengan gambar
+    ter-embed base64, supaya bisa diposisikan lewat CSS di ujung kanan
+    sejajar tombol tab. Logo yang filenya belum ada dilewati. File logo
+    dicari di folder LOGO_DIR (logo_ipb, logo_bpbd, logo_bmkg; format
+    png/jpg/jpeg)."""
     mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
     img_tags = []
-    for label, nama_file in [("IPB University", "logo_ipb"), ("BPBD Kab. Bogor", "logo_bpbd"), ("BMKG", "logo_bmkg")]:
+    for label, nama_file in [
+        ("IPB University", "logo_ipb"),
+        ("BPBD Kab. Bogor", "logo_bpbd"),
+        ("BMKG", "logo_bmkg"),
+    ]:
         for ext in ["png", "jpg", "jpeg"]:
             path = os.path.join(LOGO_DIR, f"{nama_file}.{ext}")
             if os.path.exists(path):
@@ -957,16 +1427,26 @@ if _logo_html:
     st.markdown(_logo_html, unsafe_allow_html=True)
 
 
+# --- Isi yang bisa kamu ubah sendiri untuk halaman Home ---
+TIM_PENYUSUN = []  # isi nama penyusun, mis. ["Nama Lengkap 1", "Nama Lengkap 2"]; kosong = bagian ini disembunyikan
+KONTAK_EMAIL = ""  # opsional, mis. "nama@email.com"; kosong = tidak ditampilkan
+
+
 def halaman_home(df_data, kecamatan_aktif, ada_data_bencana, ada_data_meteo):
+    """Halaman beranda: pengantar, latar belakang, tujuan, fitur, cara
+    pakai, sekilas data, sumber data & metode, FAQ, batasan, dan tentang
+    penyusun. Teksnya sengaja dibuat sederhana dan mudah diubah."""
     bulan_singkat = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
 
+    # --- Hero ---
     st.markdown(
         f"""
 <div class="hero">
   <div class="hero-kicker">Departemen Geofisika dan Meteorologi · IPB University</div>
   <div class="hero-title">Dashboard Pemantauan Bencana<br>Kabupaten Bogor</div>
   <div class="hero-sub">Menghubungkan data kejadian bencana dengan kondisi meteorologi
-  per kecamatan, untuk melihat di mana bencana sering terjadi dan kaitannya dengan cuaca.</div>
+  per kecamatan, untuk membantu melihat di mana bencana sering terjadi dan
+  kaitannya dengan kondisi cuaca.</div>
   <div class="hero-chips">
     <span>{len(KECAMATAN_BOGOR)} kecamatan</span>
     <span>{len(TYPE_COLUMN_MAP)} jenis bencana</span>
@@ -976,24 +1456,29 @@ def halaman_home(df_data, kecamatan_aktif, ada_data_bencana, ada_data_meteo):
 """,
         unsafe_allow_html=True,
     )
-    st.caption("Unggah data dan atur filter lewat sidebar, lalu buka tab **Dashboard Utama** atau **Peta Analisis 2026**.")
+    st.caption("Gunakan menu di sidebar untuk mengunggah data dan mengatur filter, lalu buka tab **Dashboard Utama** atau **Peta Analisis 2026**.")
 
+    # --- Latar belakang ---
     st.markdown("### Latar belakang")
     kiri, kanan = st.columns([1.4, 1])
     with kiri:
         st.markdown(
             """
-Kabupaten Bogor terdiri dari 40 kecamatan, dari dataran rendah di utara sampai
-pegunungan di selatan, dengan curah hujan yang tinggi. Wilayah ini rentan terhadap
-bencana hidrometeorologi seperti banjir, tanah longsor, angin kencang, dan kekeringan.
+Kabupaten Bogor terdiri dari 40 kecamatan dengan kondisi wilayah yang beragam,
+dari dataran rendah di utara hingga kawasan pegunungan di selatan, dan dikenal
+memiliki curah hujan yang tinggi. Kondisi ini membuat wilayahnya rentan
+terhadap berbagai bencana, terutama bencana hidrometeorologi seperti banjir,
+tanah longsor, angin kencang, dan kekeringan.
 
-Curah hujan, kelembapan, suhu, dan kecepatan angin bisa memicu atau memperparah
-kejadian bencana. Memahami kaitannya penting untuk mengenali potensi bencana lebih
-awal dan merencanakan mitigasi.
+Cuaca dan iklim sangat memengaruhi terjadinya bencana-bencana tersebut.
+Parameter seperti curah hujan, kelembapan, suhu udara, dan kecepatan angin
+dapat memicu atau memperparah kejadian bencana. Karena itu, memahami hubungan
+antara kondisi meteorologi dan kejadian bencana penting untuk mengenali potensi
+bencana lebih awal dan merencanakan mitigasi.
 
-Dashboard ini dibuat oleh mahasiswa Departemen Geofisika dan Meteorologi IPB University
-sebagai prototipe alat bantu untuk memantau dan menganalisis kejadian bencana di
-Kabupaten Bogor berbasis data.
+Dashboard ini dikembangkan oleh mahasiswa Departemen Geofisika dan Meteorologi
+IPB University sebagai prototipe alat bantu untuk memantau dan menganalisis
+kejadian bencana di Kabupaten Bogor secara lebih mudah dan berbasis data.
 """
         )
     with kanan:
@@ -1001,17 +1486,18 @@ Kabupaten Bogor berbasis data.
             st.markdown("**Tujuan**")
             st.markdown(
                 "- Menampilkan sebaran kejadian bencana per jenis, waktu, dan kecamatan.\n"
-                "- Melihat kaitan curah hujan dengan bencana hidrometeorologi.\n"
-                "- Membandingkan indeks risiko sederhana antar-kecamatan.\n"
-                "- Menyediakan peta hasil analisis bencana 2026 per jenis bencana."
+                "- Melihat kaitan kondisi meteorologi dengan kejadian bencana di tiap desa dan kecamatan.\n"
+                "- Menyajikan indeks risiko sederhana untuk membandingkan antar-kecamatan.\n"
+                "- Menyediakan peta hasil analisis bencana tahun 2026 per jenis bencana."
             )
 
+    # --- Fitur ---
     st.markdown("### Yang bisa dilihat di dashboard")
     fitur = [
-        ("Sebaran kejadian", "Peta titik kejadian per jenis bencana, ukuran titik sesuai keparahan."),
-        ("Tren & komposisi", "Jumlah kejadian per bulan, komposisi jenis bencana, dan kecamatan terbanyak."),
-        ("Korelasi meteorologi", "Hubungan curah hujan dengan bencana hidrometeorologi, dengan garis regresi dan R²."),
-        ("Peta analisis 2026", "Peta hasil analisis yang disiapkan terpisah, dipilih per jenis bencana."),
+        ("Sebaran kejadian", "Peta titik kejadian per jenis bencana, dengan ukuran titik sesuai indeks keparahan."),
+        ("Tren & komposisi", "Jumlah kejadian per bulan, komposisi jenis bencana, dan kecamatan dengan kejadian terbanyak."),
+        ("Meteorologi di titik kejadian", "Arahkan kursor ke titik bencana untuk melihat jenis, tanggal, desa, dan meteorologi kecamatannya."),
+        ("Peta analisis 2026", "Peta hasil analisis yang sudah disiapkan terpisah, dipilih per jenis bencana."),
     ]
     for kolom, (judul, isi) in zip(st.columns(len(fitur)), fitur):
         with kolom:
@@ -1019,49 +1505,58 @@ Kabupaten Bogor berbasis data.
                 st.markdown(f"**{judul}**")
                 st.caption(isi)
 
+    # --- Cara menggunakan ---
     st.markdown("### Cara menggunakan")
     st.markdown(
         """
-1. **Siapkan data.** Di sidebar, unggah CSV kejadian bencana (format BPBD) dan CSV meteorologi,
-   bisa satu file, beberapa file, atau satu folder. Tanpa unggahan, dashboard memakai data simulasi.
-2. **Atur filter.** Pilih tahun, bulan, jenis bencana, dan kecamatan.
-3. **Baca hasilnya.** Buka tab **Dashboard Utama**.
-4. **Lihat peta analisis.** Buka tab **Peta Analisis 2026**, lalu pilih jenis bencananya.
+1. **Siapkan data.** Di sidebar, unggah CSV kejadian bencana (format laporan BPBD Kabupaten Bogor)
+   dan CSV meteorologi. Bisa satu file, beberapa file, atau satu folder. Tanpa unggahan, dashboard
+   menampilkan data simulasi sebagai contoh.
+2. **Atur filter.** Pilih tahun, bulan, jenis bencana, dan kecamatan di sidebar.
+3. **Baca hasilnya.** Buka tab **Dashboard Utama**: arahkan kursor ke titik di peta untuk melihat info kejadian dan meteorologi kecamatan, lalu baca interpretasi di bawah peta, tren, dan indikator meteorologi.
+4. **Lihat peta analisis.** Buka tab **Peta Analisis 2026** dan pilih jenis bencananya.
 """
     )
 
+    # --- Sekilas data ---
     st.markdown("### Sekilas data")
     if ada_data_bencana:
-        st.caption("Ringkasan seluruh periode dari file yang diunggah (hanya kecamatan dengan data lengkap).")
+        st.caption("Ringkasan seluruh periode dari file kejadian bencana yang diunggah (hanya kecamatan yang datanya lengkap).")
     else:
-        st.caption("Ringkasan data simulasi. Unggah CSV kejadian bencana di sidebar untuk melihat data sebenarnya.")
+        st.caption("Ringkasan data simulasi (contoh). Unggah CSV kejadian bencana di sidebar untuk melihat data sebenarnya.")
     if len(df_data) > 0:
         tgl_min, tgl_max = df_data["tanggal"].min(), df_data["tanggal"].max()
         periode = f"{bulan_singkat[tgl_min.month - 1]} {tgl_min.year} – {bulan_singkat[tgl_max.month - 1]} {tgl_max.year}"
+        jenis_top = df_data["jenis_bencana"].value_counts().idxmax()
+        kec_top = df_data["kecamatan"].value_counts().idxmax()
         stat_items = [
             ("Total kejadian", f"{len(df_data):,}".replace(",", ".")),
-            ("Jenis terbanyak", df_data["jenis_bencana"].value_counts().idxmax()),
-            ("Kecamatan terbanyak", df_data["kecamatan"].value_counts().idxmax()),
+            ("Jenis terbanyak", jenis_top),
+            ("Kecamatan terbanyak", kec_top),
             ("Periode data", periode),
         ]
         for kolom, (label, value) in zip(st.columns(4), stat_items):
             with kolom:
                 with st.container(border=True):
                     st.markdown(
-                        f'<div class="mini-stat-card"><div class="mini-stat-label">{label}</div>'
-                        f'<div class="mini-stat-value">{value}</div></div>',
+                        f'<div class="mini-stat-card">'
+                        f'<div class="mini-stat-label">{label}</div>'
+                        f'<div class="mini-stat-value">{value}</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
 
+    # --- Sumber data & metode ---
     st.markdown("### Sumber data dan metode")
     m1, m2 = st.columns(2)
     with m1:
         with st.container(border=True):
             st.markdown("**Data yang dipakai**")
             st.markdown(
-                "- **Kejadian bencana:** laporan BPBD Kabupaten Bogor (jenis, waktu, lokasi, korban, rumah terdampak).\n"
+                "- **Kejadian bencana:** laporan kejadian bencana BPBD Kabupaten Bogor "
+                "(jenis, waktu, lokasi, korban, dan rumah terdampak).\n"
                 "- **Meteorologi:** curah hujan, suhu, kelembapan, dan kecepatan angin per kecamatan "
-                "(diunggah pengguna, kalau tidak ada dipakai data simulasi).\n"
+                "(diunggah pengguna; tanpa unggahan dipakai data simulasi).\n"
                 "- **Peta analisis 2026:** hasil analisis terpisah per jenis bencana."
             )
     with m2:
@@ -1070,49 +1565,58 @@ Kabupaten Bogor berbasis data.
             st.markdown(
                 "- **Intensitas hujan:** klasifikasi harian BMKG (ringan 5–20, sedang 20–50, "
                 "lebat 50–100, sangat lebat di atas 100 mm/hari).\n"
-                "- **Keparahan (1–5):** proksi dari korban jiwa, luka, rumah rusak, rumah terdampak, dan pengungsi.\n"
-                "- **Indeks risiko (0–100):** jumlah kejadian (45%), rata-rata keparahan (30%), curah hujan (25%)."
+                "- **Keparahan (1–5):** proksi dari korban jiwa, luka, rumah rusak, rumah terdampak, "
+                "dan jumlah pengungsi.\n"
+                "- **Indeks risiko (0–100):** gabungan jumlah kejadian (45%), rata-rata keparahan (30%), "
+                "dan curah hujan (25%)."
             )
 
+    # --- FAQ ---
     st.markdown("### Pertanyaan yang sering diajukan")
     with st.expander("Apa arti ukuran titik di peta sebaran?"):
         st.write(
-            "Ukuran titik menunjukkan indeks keparahan (proksi dampak pada manusia dan rumah), "
-            "bukan luas area bencana."
+            "Ukuran titik menunjukkan indeks keparahan, yaitu proksi dari dampak kejadian pada manusia "
+            "dan rumah. Ukuran ini bukan luas area bencana: titik besar berarti dampaknya besar, "
+            "bukan otomatis areanya luas."
         )
     with st.expander("Apakah indeks risiko ini resmi?"):
         st.write(
-            "Bukan. Ini indeks sederhana untuk membandingkan kecamatan. IRBI resmi dari BNPB "
-            "disusun per kabupaten/kota dengan metodologi yang berbeda."
+            "Bukan. Indeks risiko di dashboard ini adalah komposit sederhana untuk membandingkan "
+            "kecamatan. Indeks Risiko Bencana Indonesia (IRBI) resmi dari BNPB disusun per kabupaten/kota "
+            "dengan metodologi yang berbeda."
         )
     with st.expander("Mengapa ada kecamatan yang tidak muncul?"):
         st.write(
-            "Kalau data meteorologi diunggah, hanya kecamatan yang punya data bencana dan data "
-            "meteorologi sekaligus yang ditampilkan. Kecamatan lainnya disebutkan di sidebar."
+            "Kalau data meteorologi diunggah, dashboard hanya menampilkan kecamatan yang punya data "
+            "kejadian bencana dan data meteorologi sekaligus. Kecamatan yang datanya belum lengkap "
+            "disebutkan di sidebar."
         )
     with st.expander("Format data apa yang bisa diunggah?"):
         st.write(
-            "CSV. Data bencana bisa berupa laporan BPBD apa adanya atau tabel sederhana dengan kolom "
-            "tanggal, jenis_bencana, kecamatan. Data meteorologi minimal berisi kecamatan dan curah hujan. "
-            "Bisa satu file, beberapa file, atau satu folder."
+            "Format CSV. Data kejadian bencana bisa berupa laporan BPBD Kabupaten Bogor apa adanya, atau "
+            "tabel sederhana dengan kolom tanggal, jenis_bencana, dan kecamatan. Data meteorologi minimal "
+            "berisi kecamatan dan curah hujan (nama kolom fleksibel). Semuanya bisa diunggah sebagai satu "
+            "file, beberapa file, atau satu folder."
         )
-    with st.expander("Apa bedanya Dashboard Utama dan Peta Analisis 2026?"):
+    with st.expander("Apa bedanya tab Dashboard Utama dan Peta Analisis 2026?"):
         st.write(
-            "Dashboard Utama dibuat otomatis dari data yang diunggah dan bisa difilter. Peta Analisis 2026 "
-            "berisi peta yang disiapkan terpisah, satu untuk setiap jenis bencana."
+            "Dashboard Utama digambar otomatis dari data yang kamu unggah dan bisa difilter. Peta Analisis "
+            "2026 berisi peta hasil analisis yang sudah disiapkan terpisah, satu untuk setiap jenis bencana."
         )
 
+    # --- Batasan ---
     st.info(
-        "**Catatan.** Dashboard ini masih prototipe. Koordinat pusat kecamatan hanya perkiraan, keparahan "
-        "dan indeks risiko adalah proksi, dan data meteorologi yang belum diunggah masih simulasi. "
-        "Sesuaikan sumber data dan metodenya sebelum dipakai untuk laporan resmi."
+        "**Catatan penting.** Dashboard ini adalah prototipe. Koordinat pusat kecamatan adalah perkiraan, "
+        "keparahan dan indeks risiko adalah proksi, dan data meteorologi yang belum diunggah masih berupa "
+        "simulasi. Sesuaikan sumber data dan metodologinya sebelum dipakai untuk laporan atau keputusan resmi."
     )
 
+    # --- Tentang penyusun ---
     st.markdown("### Tentang penyusun")
     st.markdown(
         "Dikembangkan oleh mahasiswa **Departemen Geofisika dan Meteorologi, IPB University**. "
-        "Sumber rujukan: **BPBD Kabupaten Bogor** (data kejadian bencana) dan "
-        "**BMKG** (klasifikasi intensitas hujan dan data meteorologi)."
+        "Instansi dan sumber rujukan terkait: **BPBD Kabupaten Bogor** (data kejadian bencana) dan "
+        "**BMKG** (rujukan klasifikasi intensitas hujan dan data meteorologi)."
     )
     if TIM_PENYUSUN:
         st.markdown("**Tim penyusun:**\n" + "\n".join(f"- {nama}" for nama in TIM_PENYUSUN))
@@ -1127,16 +1631,30 @@ Kabupaten Bogor berbasis data.
     )
 
 
-# Peta analisis 2026 tidak digambar dari data di atas, tapi berupa file hasil
-# analisis terpisah (QGIS/ArcGIS/dll). Taruh di folder peta_analisis/ dengan
-# nama peta_<jenis>_2026.<png/jpg/jpeg/html>, mis. peta_tanah_longsor_2026.png
+# Peta pada bagian ini BUKAN digambar otomatis dari data kejadian di atas,
+# melainkan hasil analisis yang sudah disiapkan terpisah (mis. dari QGIS/
+# ArcGIS/Kepler.gl) untuk tahun 2026, satu peta per jenis bencana. Taruh
+# berkasnya di folder PETA_ANALISIS_DIR di samping file dashboard ini,
+# dengan pola nama: peta_<jenis_bencana>_2026.<ekstensi>
+#   - <jenis_bencana>: huruf kecil, spasi diganti underscore
+#     (contoh: "Tanah Longsor" -> tanah_longsor, "Angin Kencang" -> angin_kencang)
+#   - <ekstensi>: png/jpg/jpeg untuk gambar statis (hasil ekspor peta biasa),
+#     atau html untuk peta interaktif (hasil ekspor Folium/Kepler.gl/dst.)
+# Contoh nama file yang benar:
+#   peta_analisis/peta_banjir_2026.png
+#   peta_analisis/peta_tanah_longsor_2026.html
+
+PETA_ANALISIS_DIR = "peta_analisis"
+JENIS_PETA_2026 = ["Banjir", "Tanah Longsor", "Kebakaran", "Kekeringan", "Angin Kencang", "Karhutla"]
 
 
-def slug_jenis_peta(nama):
+def slug_jenis_peta(nama: str) -> str:
     return nama.strip().lower().replace(" ", "_")
 
 
-def cari_file_peta(jenis):
+def cari_file_peta(jenis: str):
+    """Mencari berkas peta hasil analisis untuk satu jenis bencana.
+    Mengembalikan (path, ekstensi) atau (None, None) kalau belum ditemukan."""
     slug = slug_jenis_peta(jenis)
     for ext in ["png", "jpg", "jpeg", "html"]:
         path = os.path.join(PETA_ANALISIS_DIR, f"peta_{slug}_2026.{ext}")
@@ -1151,11 +1669,14 @@ with tab_home:
     halaman_home(df_all, kecamatan_aktif, ada_data_bencana, ada_data_meteo)
 
 with tab_utama:
-    # --- Header dan KPI ---
+    # ---------------------------------------------------------------------------
+    # 6. HEADER & BARIS KPI
+    # ---------------------------------------------------------------------------
+
     st.markdown("## Pemantauan Bencana — Kabupaten Bogor")
     st.markdown(
-        '<p class="dash-caption">Departemen Geofisika dan Meteorologi, IPB University · '
-        "cakupan Kabupaten Bogor.</p>",
+        '<p class="dash-caption">Departemen Geofisika dan Meteorologi, IPB '
+        "University · cakupan Kabupaten Bogor.</p>",
         unsafe_allow_html=True,
     )
     if not ada_data_bencana or not ada_data_meteo:
@@ -1165,15 +1686,17 @@ with tab_utama:
         if not ada_data_meteo:
             bagian_kurang.append("meteorologi")
         st.markdown(
-            '<div class="proto-note">📌 Data ' + " & ".join(bagian_kurang) + " masih <b>simulasi</b>. "
-            "Unggah CSV di sidebar untuk melihat data sebenarnya.</div>",
+            '<div class="proto-note">📌 Data ' + " & ".join(bagian_kurang) + " masih "
+            "<b>simulasi</b>. Unggah CSV yang sesuai di sidebar untuk melihat data "
+            "sebenarnya.</div>",
             unsafe_allow_html=True,
         )
     elif len(kecamatan_aktif) < len(KECAMATAN_BOGOR):
         st.markdown(
-            f'<div class="proto-note">📌 Dashboard hanya menampilkan <b>{len(kecamatan_aktif)} dari '
-            f"{len(KECAMATAN_BOGOR)} kecamatan</b>. Kecamatan lain belum punya data bencana <i>dan</i> "
-            "meteorologi sekaligus (lihat sidebar).</div>",
+            f'<div class="proto-note">📌 Dashboard hanya menampilkan '
+            f"<b>{len(kecamatan_aktif)} dari {len(KECAMATAN_BOGOR)} kecamatan</b> — "
+            "kecamatan lain belum punya data kejadian bencana <i>dan</i> data "
+            "meteorologi sekaligus (lihat catatan di sidebar).</div>",
             unsafe_allow_html=True,
         )
 
@@ -1187,18 +1710,35 @@ with tab_utama:
 
     st.markdown("---")
 
-    # --- Peta sebaran, tren, komposisi ---
+    # ---------------------------------------------------------------------------
+    # 7 & 8. PETA SEBARAN + TREN BULANAN
+    # ---------------------------------------------------------------------------
+
     left, right = st.columns([1.55, 1])
 
     with left:
         st.markdown("#### Sebaran titik kejadian")
         st.caption(
-            "Ukuran titik = indeks keparahan. Basemap OpenStreetMap (butuh internet). "
-            "Titik tanpa koordinat asli ditempatkan di sekitar titik tengah kecamatan."
+            "Ukuran titik = indeks keparahan relatif kejadian. Peta memakai basemap "
+            "OpenStreetMap (butuh koneksi internet). Arahkan kursor ke titik untuk melihat "
+            "jenis bencana, tanggal, desa, dan (bila data meteorologi diunggah) meteorologi "
+            "rata-rata kecamatannya. Titik tanpa koordinat asli ditempatkan di sekitar "
+            "titik tengah kecamatan."
         )
+
+        if meteo_dari_file:
+            df_peta = df.merge(
+                df_meteo[["kecamatan", "curah_hujan_mm_hari", "kategori_intensitas",
+                          "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]],
+                on="kecamatan", how="left",
+            )
+        else:
+            df_peta = df.copy()
+        df_peta["_hover"] = [teks_hover_titik(r, meteo_dari_file) for _, r in df_peta.iterrows()]
+
         fig_map = go.Figure()
         for jenis in jenis_opsi:
-            sub = df[df["jenis_bencana"] == jenis]
+            sub = df_peta[df_peta["jenis_bencana"] == jenis]
             if sub.empty:
                 continue
             fig_map.add_trace(
@@ -1207,10 +1747,7 @@ with tab_utama:
                     lon=sub["lon"],
                     mode="markers",
                     name=jenis,
-                    text=sub.apply(
-                        lambda r: f"{r['jenis_bencana']}<br>{r['kecamatan']}<br>{r['tanggal'].strftime('%d %b %Y')}",
-                        axis=1,
-                    ),
+                    text=sub["_hover"],
                     hoverinfo="text",
                     marker=dict(size=(sub["keparahan"] * 3.2 + 6), color=PALETTE.get(jenis, "#999999"), opacity=0.85),
                 )
@@ -1223,8 +1760,30 @@ with tab_utama:
         )
         st.plotly_chart(fig_map, use_container_width=True)
 
+        st.markdown("##### Interpretasi kejadian dan meteorologi")
+        if df.empty:
+            st.info("Tidak ada kejadian pada filter saat ini.")
+        else:
+            st.caption(
+                "Pilih kecamatan untuk membaca kaitan kejadian bencana di desa/kecamatan "
+                "tersebut dengan data meteorologinya."
+            )
+            kec_interp = st.selectbox("Pilih kecamatan", list(df["kecamatan"].value_counts().index), index=0)
+            df_kec = df[df["kecamatan"] == kec_interp]
+            rata_meteo = df_meteo[KOLOM_METEO_NILAI].mean()
+            m_kec = None
+            rank_hujan = None
+            if meteo_dari_file:
+                baris_m = df_meteo[df_meteo["kecamatan"] == kec_interp]
+                if len(baris_m):
+                    m_kec = baris_m.iloc[0]
+                    urut = df_meteo["curah_hujan_mm_hari"].rank(ascending=False, method="min")
+                    rank_hujan = int(urut[baris_m.index[0]])
+            st.markdown("\n".join(f"- {k}" for k in susun_interpretasi(
+                df_kec, kec_interp, m_kec, rata_meteo, rank_hujan, len(df_meteo))))
+
         st.markdown("#### Tren bulanan")
-        st.caption("Jumlah kejadian per bulan menurut jenis bencana.")
+        st.caption("Jumlah kejadian tercatat per bulan, dipecah menurut jenis.")
         df_trend = df.copy()
         df_trend["bulan"] = df_trend["tanggal"].dt.to_period("M").astype(str)
         trend_agg = df_trend.groupby(["bulan", "jenis_bencana"]).size().reset_index(name="jumlah")
@@ -1256,98 +1815,15 @@ with tab_utama:
 
     st.markdown("---")
 
-    # --- Korelasi curah hujan vs kejadian ---
-    st.markdown("#### Korelasi curah hujan vs kejadian bencana per kecamatan")
-    st.caption(
-        "Sumbu X: curah hujan rata-rata (mm/hari). Sumbu Y: jumlah kejadian hidrometeorologi "
-        "(banjir, tanah longsor, angin kencang, kekeringan). Ukuran titik: total kejadian semua jenis. "
-        "Warna: kategori indeks risiko (bukan IRBI resmi)."
-    )
+    # ---------------------------------------------------------------------------
+    # 10. INDIKATOR METEOROLOGI PER KECAMATAN
+    # ---------------------------------------------------------------------------
 
-    hidro_count = (
-        df[df["jenis_bencana"].isin(HIDROMETEOROLOGI)]
-        .groupby("kecamatan").size().reset_index(name="kejadian_hidrometeorologi")
-    )
-    corr_df = df_risk.merge(hidro_count, on="kecamatan", how="left").fillna({"kejadian_hidrometeorologi": 0})
-
-    fig_corr = px.scatter(
-        corr_df,
-        x="curah_hujan_mm_hari",
-        y="kejadian_hidrometeorologi",
-        size="jumlah_kejadian",
-        color="kategori_risiko",
-        color_discrete_map=RISK_COLOR,
-        hover_name="kecamatan",
-        hover_data={"indeks_risiko": True, "rata_keparahan": ":.1f", "jumlah_kejadian": True,
-                    "curah_hujan_mm_hari": ":.1f", "kejadian_hidrometeorologi": True},
-        labels={
-            "curah_hujan_mm_hari": "Curah hujan rata-rata (mm/hari)",
-            "kejadian_hidrometeorologi": "Jumlah kejadian hidrometeorologi",
-            "kategori_risiko": "Indeks risiko",
-        },
-        size_max=32,
-    )
-
-    # regresi linear (kuadrat terkecil) dan R², dihitung pakai numpy
-    x_vals = corr_df["curah_hujan_mm_hari"].to_numpy(dtype=float)
-    y_vals = corr_df["kejadian_hidrometeorologi"].to_numpy(dtype=float)
-
-    r_squared = np.nan
-    if len(x_vals) >= 2 and np.std(x_vals) > 0:
-        slope, intercept = np.polyfit(x_vals, y_vals, 1)
-        y_pred = slope * x_vals + intercept
-        ss_res = np.sum((y_vals - y_pred) ** 2)
-        ss_tot = np.sum((y_vals - y_vals.mean()) ** 2)
-        r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
-        r_koefisien = np.sign(slope) * np.sqrt(r_squared)
-
-        x_garis = np.linspace(x_vals.min(), x_vals.max(), 50)
-        fig_corr.add_trace(
-            go.Scatter(
-                x=x_garis, y=slope * x_garis + intercept, mode="lines", name="Garis regresi",
-                line=dict(color="#5E6B7A", width=2, dash="dash"), hoverinfo="skip",
-            )
-        )
-        fig_corr.add_annotation(
-            xref="paper", yref="paper", x=0.02, y=0.98, xanchor="left", yanchor="top",
-            showarrow=False,
-            text=f"R² = {r_squared:.3f}  (r = {r_koefisien:.3f})<br>y = {slope:.3f}x + {intercept:.2f}",
-            font=dict(size=12, color="#3A4552"),
-            align="left", bgcolor="rgba(255,255,255,0.75)",
-            bordercolor="rgba(127,127,127,0.35)", borderwidth=1, borderpad=6,
-        )
-
-    fig_corr.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), legend_title_text="Indeks risiko")
-    st.plotly_chart(fig_corr, use_container_width=True)
-
-    if not np.isnan(r_squared):
-        if r_squared >= 0.64:
-            kekuatan = "kuat"
-        elif r_squared >= 0.36:
-            kekuatan = "sedang"
-        elif r_squared >= 0.09:
-            kekuatan = "lemah"
-        else:
-            kekuatan = "sangat lemah / tidak ada"
-        arah = "positif" if r_koefisien >= 0 else "negatif"
-        st.caption(
-            f"R² = {r_squared:.3f}, artinya sekitar {r_squared*100:.1f}% variasi jumlah kejadian "
-            f"hidrometeorologi antar-kecamatan bisa dijelaskan secara linear oleh curah hujan. "
-            f"Hubungannya {arah} dengan kekuatan **{kekuatan}** "
-            "(patokan kasar: < 0,09 sangat lemah, 0,09–0,36 lemah, 0,36–0,64 sedang, > 0,64 kuat). "
-            f"Ini korelasi sederhana, bukan bukti sebab-akibat, dan baru memakai {len(kecamatan_aktif)} titik data."
-        )
-    else:
-        st.caption("R² belum bisa dihitung karena curah hujan tidak bervariasi atau titik data kurang dari 2.")
-
-    st.markdown("---")
-
-    # --- Indikator meteorologi ---
     st.markdown("#### Indikator meteorologi")
     st.caption(
-        f"Rata-rata untuk {len(kecamatan_aktif)} kecamatan dengan data lengkap."
+        f"Nilai rata-rata untuk {len(kecamatan_aktif)} kecamatan yang datanya lengkap."
         if meteo_dari_file else
-        "Rata-rata seluruh kecamatan (data simulasi)."
+        "Nilai rata-rata seluruh kecamatan (data simulasi)."
     )
 
     m1, m2, m3, m4 = st.columns(4)
@@ -1385,31 +1861,42 @@ with tab_utama:
 
     st.markdown("---")
 
-    # --- Log kejadian ---
+    # ---------------------------------------------------------------------------
+    # 11. LOG KEJADIAN TERBARU
+    # ---------------------------------------------------------------------------
+
     st.markdown("#### Log kejadian terbaru")
-    log_cols = ["tanggal", "jenis_bencana", "kecamatan", "meninggal", "mengungsi", "rumah_terdampak", "status"]
+    log_cols = ["tanggal", "jenis_bencana", "desa", "kecamatan", "meninggal", "mengungsi", "rumah_terdampak", "status"]
     df_log = df.sort_values("tanggal", ascending=False)[log_cols].head(30).copy()
     df_log["tanggal"] = df_log["tanggal"].dt.strftime("%d %b %Y")
-    df_log.columns = ["Tanggal", "Jenis", "Kecamatan", "Meninggal", "Mengungsi", "Rumah Terdampak", "Status"]
+    df_log.columns = ["Tanggal", "Jenis", "Desa/Kel.", "Kecamatan", "Meninggal", "Mengungsi", "Rumah Terdampak", "Status"]
     st.dataframe(df_log, use_container_width=True, hide_index=True)
 
-    st.caption("Indeks risiko hanya komposit sederhana untuk prototipe. Sesuaikan metodenya sebelum dipakai untuk laporan resmi.")
+    st.caption(
+        "Indeks risiko adalah komposit sederhana untuk keperluan prototipe. Sesuaikan "
+        "metodologinya sebelum dipakai untuk analisis atau laporan resmi."
+    )
 
 with tab_peta_2026:
     st.markdown("### Peta Hasil Analisis Bencana 2026")
     st.caption(
-        "Peta hasil analisis kebencanaan Kabupaten Bogor tahun 2026 per jenis bencana. "
-        "Peta ini disiapkan terpisah, bukan digambar dari data di tab \"Dashboard Utama\"."
+        "Peta hasil analisis kebencanaan Kabupaten Bogor tahun 2026, dipilih per "
+        "jenis bencana. Peta ini hasil analisis yang sudah disiapkan terpisah, "
+        "bukan digambar otomatis dari data kejadian di tab \"Dashboard Utama\"."
     )
 
-    jenis_peta_pilih = st.radio("Pilih jenis bencana", JENIS_PETA_2026, horizontal=True, key="peta2026_jenis")
+    jenis_peta_pilih = st.radio(
+        "Pilih jenis bencana", JENIS_PETA_2026, horizontal=True, key="peta2026_jenis"
+    )
 
     path_peta, ext_peta = cari_file_peta(jenis_peta_pilih)
     if path_peta is None:
         st.warning(
-            f"Berkas peta **{jenis_peta_pilih}** belum ditemukan. Taruh file di folder "
-            f"`{PETA_ANALISIS_DIR}/` dengan nama `peta_{slug_jenis_peta(jenis_peta_pilih)}_2026.png` "
-            "(atau .jpg/.jpeg untuk gambar, .html untuk peta interaktif)."
+            f"Berkas peta untuk **{jenis_peta_pilih}** belum ditemukan. Taruh file "
+            f"peta di folder `{PETA_ANALISIS_DIR}/` (sejajar dengan main.py) "
+            f"dengan nama `peta_{slug_jenis_peta(jenis_peta_pilih)}_2026.png` (atau "
+            ".jpg/.jpeg untuk gambar statis, .html untuk peta interaktif hasil ekspor "
+            "Folium/Kepler.gl/dst.)."
         )
     elif ext_peta == "html":
         with open(path_peta, "r", encoding="utf-8") as f:
