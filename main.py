@@ -15,7 +15,7 @@ HALAMAN
     Home              : latar belakang, tujuan, fitur, cara pakai, sumber data
                         & metode, FAQ, batasan, tentang penyusun
                         (lihat halaman_home()).
-    Dashboard Utama   : KPI, peta sebaran (hover: bencana, tanggal, desa, meteo),
+    Dashboard Utama   : KPI, peta sebaran (hover: bencana, tanggal, kecamatan, meteo),
                         interpretasi, tren, indikator meteorologi, dst.
     Peta Analisis 2026: peta hasil analisis per jenis bencana.
 
@@ -159,7 +159,6 @@ PEMICU_METEO = {
     "Angin Kencang": "angin", "Kekeringan": "kering", "Karhutla": "kering",
 }
 KOLOM_METEO_NILAI = ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
-DESA_KOSONG = "Tidak tercatat"
 
 CUSTOM_CSS = """
 <style>
@@ -489,7 +488,6 @@ def generate_dummy_data(n_rows: int = 220, seed: int = 42) -> pd.DataFrame:
                 "tanggal": pd.Timestamp(year=int(tahun), month=int(bulan), day=int(hari)),
                 "jenis_bencana": jenis,
                 "kecamatan": kec["n"],
-                "desa": DESA_KOSONG,
                 "lat": kec["lat"] + rng.uniform(-0.03, 0.03),
                 "lon": kec["lon"] + rng.uniform(-0.03, 0.03),
                 "meninggal": int(rng.poisson(keparahan * 0.3)),
@@ -837,11 +835,9 @@ def _ada(v) -> bool:
 
 def teks_hover_titik(r, dengan_meteo: bool) -> str:
     """Teks hover (HTML sederhana) satu titik kejadian."""
-    desa = escape(str(r.get("desa", DESA_KOSONG)))
     baris = [
         f"<b>{escape(str(r['jenis_bencana']))}</b>",
         f"Tanggal: {r['tanggal'].strftime('%d %b %Y')}",
-        f"Desa/Kel.: {desa}",
         f"Kecamatan: {escape(str(r['kecamatan']))}",
     ]
     if dengan_meteo:
@@ -931,13 +927,6 @@ def susun_interpretasi(df_kec, nama_kec, m, rata, rank, total) -> list:
     jenis_hit = df_kec["jenis_bencana"].value_counts()
     top = ", ".join(f"{j} ({c})" for j, c in jenis_hit.head(3).items())
     out.append(f"Kecamatan **{nama_kec}** mencatat **{n} kejadian** pada periode/filter terpilih. Terbanyak: {top}.")
-
-    desa_hit = df_kec.loc[df_kec["desa"] != DESA_KOSONG, "desa"].value_counts()
-    if len(desa_hit):
-        out.append("Desa/kelurahan dengan kejadian terbanyak: "
-                   + ", ".join(f"{d} ({c})" for d, c in desa_hit.head(3).items()) + ".")
-    else:
-        out.append("Nama desa/kelurahan tidak tercatat pada data kejadian.")
 
     if m is None:
         out.append("Data meteorologi belum diunggah, sehingga hubungan dengan cuaca belum bisa diinterpretasikan.")
@@ -1066,22 +1055,11 @@ def _parse_format_bpbd(uploaded_file):
     else:
         status = pd.Series("Tidak Diketahui", index=df_raw.index)
 
-    # --- desa/kelurahan (kolom "DESA / KELURAHAN", opsional) ---
-    desa_key = next((k for k in col_lookup if k.startswith("DESA")), None)
-    if desa_key:
-        desa = (
-            df_raw[col_lookup[desa_key]].fillna("").astype(str).str.strip()
-            .replace({"": DESA_KOSONG, "nan": DESA_KOSONG, "-": DESA_KOSONG})
-        )
-    else:
-        desa = pd.Series(DESA_KOSONG, index=df_raw.index)
-
     hasil = pd.DataFrame(
         {
             "tanggal": tanggal,
             "jenis_bencana": jenis,
             "kecamatan": df_raw[col_lookup["KECAMATAN"]].astype(str).str.strip(),
-            "desa": desa,
             "lat": lat_parsed,
             "lon": lon_parsed,
             "meninggal": meninggal.astype(int),
@@ -1111,7 +1089,7 @@ def _parse_format_sederhana(uploaded_file):
     df_csv = isi_koordinat_otomatis(df_csv)
     for kol, default in [
         ("meninggal", 0), ("mengungsi", 0), ("rumah_terdampak", 0),
-        ("keparahan", 2.5), ("status", "Tidak Diketahui"), ("desa", DESA_KOSONG),
+        ("keparahan", 2.5), ("status", "Tidak Diketahui"),
     ]:
         if kol not in df_csv.columns:
             df_csv[kol] = default
@@ -1162,12 +1140,6 @@ def load_data(uploaded_files) -> pd.DataFrame:
         return generate_dummy_data()
 
     gabungan = pd.concat(bagian, ignore_index=True)
-    if "desa" not in gabungan.columns:
-        gabungan["desa"] = DESA_KOSONG
-    gabungan["desa"] = (
-        gabungan["desa"].fillna(DESA_KOSONG).astype(str).str.strip()
-        .replace({"": DESA_KOSONG, "nan": DESA_KOSONG, "-": DESA_KOSONG})
-    )
 
     if "_dampak_score" in gabungan.columns:
         skor = gabungan["_dampak_score"]
@@ -1486,7 +1458,7 @@ kejadian bencana di Kabupaten Bogor secara lebih mudah dan berbasis data.
             st.markdown("**Tujuan**")
             st.markdown(
                 "- Menampilkan sebaran kejadian bencana per jenis, waktu, dan kecamatan.\n"
-                "- Melihat kaitan kondisi meteorologi dengan kejadian bencana di tiap desa dan kecamatan.\n"
+                "- Melihat kaitan kondisi meteorologi dengan kejadian bencana di tiap kecamatan.\n"
                 "- Menyajikan indeks risiko sederhana untuk membandingkan antar-kecamatan.\n"
                 "- Menyediakan peta hasil analisis bencana tahun 2026 per jenis bencana."
             )
@@ -1496,7 +1468,7 @@ kejadian bencana di Kabupaten Bogor secara lebih mudah dan berbasis data.
     fitur = [
         ("Sebaran kejadian", "Peta titik kejadian per jenis bencana, dengan ukuran titik sesuai indeks keparahan."),
         ("Tren & komposisi", "Jumlah kejadian per bulan, komposisi jenis bencana, dan kecamatan dengan kejadian terbanyak."),
-        ("Meteorologi di titik kejadian", "Arahkan kursor ke titik bencana untuk melihat jenis, tanggal, desa, dan meteorologi kecamatannya."),
+        ("Meteorologi di titik kejadian", "Arahkan kursor ke titik bencana untuk melihat jenis, tanggal, kecamatan, dan meteorologinya."),
         ("Peta analisis 2026", "Peta hasil analisis yang sudah disiapkan terpisah, dipilih per jenis bencana."),
     ]
     for kolom, (judul, isi) in zip(st.columns(len(fitur)), fitur):
@@ -1721,7 +1693,7 @@ with tab_utama:
         st.caption(
             "Ukuran titik = indeks keparahan relatif kejadian. Peta memakai basemap "
             "OpenStreetMap (butuh koneksi internet). Arahkan kursor ke titik untuk melihat "
-            "jenis bencana, tanggal, desa, dan (bila data meteorologi diunggah) meteorologi "
+            "jenis bencana, tanggal, kecamatan, dan (bila data meteorologi diunggah) meteorologi "
             "rata-rata kecamatannya. Titik tanpa koordinat asli ditempatkan di sekitar "
             "titik tengah kecamatan."
         )
@@ -1765,7 +1737,7 @@ with tab_utama:
             st.info("Tidak ada kejadian pada filter saat ini.")
         else:
             st.caption(
-                "Pilih kecamatan untuk membaca kaitan kejadian bencana di desa/kecamatan "
+                "Pilih kecamatan untuk membaca kaitan kejadian bencana di kecamatan "
                 "tersebut dengan data meteorologinya."
             )
             kec_interp = st.selectbox("Pilih kecamatan", list(df["kecamatan"].value_counts().index), index=0)
@@ -1866,10 +1838,10 @@ with tab_utama:
     # ---------------------------------------------------------------------------
 
     st.markdown("#### Log kejadian terbaru")
-    log_cols = ["tanggal", "jenis_bencana", "desa", "kecamatan", "meninggal", "mengungsi", "rumah_terdampak", "status"]
+    log_cols = ["tanggal", "jenis_bencana", "kecamatan", "meninggal", "mengungsi", "rumah_terdampak", "status"]
     df_log = df.sort_values("tanggal", ascending=False)[log_cols].head(30).copy()
     df_log["tanggal"] = df_log["tanggal"].dt.strftime("%d %b %Y")
-    df_log.columns = ["Tanggal", "Jenis", "Desa/Kel.", "Kecamatan", "Meninggal", "Mengungsi", "Rumah Terdampak", "Status"]
+    df_log.columns = ["Tanggal", "Jenis", "Kecamatan", "Meninggal", "Mengungsi", "Rumah Terdampak", "Status"]
     st.dataframe(df_log, use_container_width=True, hide_index=True)
 
     st.caption(
