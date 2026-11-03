@@ -552,13 +552,15 @@ def _normalisasi_nama_kecamatan(s: str) -> str:
 
 
 _KECAMATAN_NORM_LOOKUP = {_normalisasi_nama_kecamatan(k["n"]): k["n"] for k in KECAMATAN_BOGOR}
+# ejaan alternatif yang umum di data meteorologi -> ejaan baku di daftar kecamatan
+_KECAMATAN_NORM_LOOKUP["kelapanunggal"] = "Klapanunggal"
 
 
 def cari_kecamatan_dari_nama_file(filename: str):
     """Menebak nama kecamatan dari nama file (mis. 'cibinong.csv',
     'data_ch_Cibinong_2026.csv' -> 'Cibinong'). Mengembalikan None kalau
     tidak ada nama kecamatan yang cocok sebagai bagian dari nama file."""
-    base = re.sub(r"\.csv$", "", filename, flags=re.IGNORECASE)
+    base = re.sub(r"\.(csv|xlsx|xls)$", "", filename, flags=re.IGNORECASE)
     norm = _normalisasi_nama_kecamatan(base)
     kandidat = [asli for key, asli in _KECAMATAN_NORM_LOOKUP.items() if key and key in norm]
     if not kandidat:
@@ -612,13 +614,13 @@ def _petakan_kolom_meteo(df_csv: pd.DataFrame) -> pd.DataFrame:
 
 
 def _baca_csv_fleksibel(uploaded_file) -> pd.DataFrame:
-    """Membaca CSV meteorologi dengan toleransi format yang lebih longgar
-    daripada pd.read_csv() polos:
-    - pemisah kolom dideteksi otomatis (koma, titik koma, tab, dst),
-      bukan diasumsikan koma — banyak alat ekspor (mis. Climate Engine,
-      Excel versi Indonesia) memakai titik koma;
-    - BOM UTF-8 di awal file (karakter tak kasat mata yang kadang
-      menempel di nama kolom pertama, mis. "\\ufefftanggal") dibuang."""
+    """Membaca CSV meteorologi dengan toleransi format yang longgar:
+    - pemisah kolom dideteksi dari BARIS HEADER (titik koma, tab, |, atau
+      koma — mana yang paling banyak muncul). Cara ini dipilih karena
+      file berformat Indonesia memakai titik koma sebagai pemisah DAN koma
+      sebagai desimal (mis. "20,85;22,78"), yang bisa menipu pendeteksi
+      otomatis pandas;
+    - BOM UTF-8 di awal file dibuang."""
     uploaded_file.seek(0)
     raw = uploaded_file.read()
     if isinstance(raw, bytes):
@@ -626,7 +628,25 @@ def _baca_csv_fleksibel(uploaded_file) -> pd.DataFrame:
     else:
         text = raw.lstrip("\ufeff")
     uploaded_file.seek(0)
-    return pd.read_csv(StringIO(text), sep=None, engine="python")
+    baris_pertama = text.split("\n", 1)[0]
+    hitung = {sep: baris_pertama.count(sep) for sep in [";", "\t", "|", ","]}
+    sep, n = max(hitung.items(), key=lambda kv: kv[1])
+    if n == 0:
+        return pd.read_csv(StringIO(text), sep=None, engine="python")
+    return pd.read_csv(StringIO(text), sep=sep, dtype=str)
+
+
+def _baca_tabel_meteo(uploaded_file) -> dict:
+    """Membaca file meteorologi (CSV atau Excel) menjadi {label: DataFrame}.
+    CSV -> satu tabel (label None). Excel (.xlsx) -> satu tabel per sheet,
+    label = nama sheet (nama sheet dipakai untuk mengenali parameternya)."""
+    nama = uploaded_file.name.lower()
+    if nama.endswith((".xlsx", ".xls")):
+        uploaded_file.seek(0)
+        tabel = pd.read_excel(uploaded_file, sheet_name=None)
+        uploaded_file.seek(0)
+        return {str(k): v for k, v in tabel.items()}
+    return {None: _baca_csv_fleksibel(uploaded_file)}
 
 
 def _parse_angka(value) -> float:
@@ -651,56 +671,113 @@ def _parse_angka(value) -> float:
         return np.nan
 
 
-def _perlu_pilih_manual_kecamatan(uploaded_file) -> bool:
-    """True kalau file TIDAK punya kolom kecamatan yang dikenali DAN nama
-    kecamatan tidak bisa ditebak dari nama filenya — sehingga perlu
-    dropdown pilihan manual di sidebar."""
-    if cari_kecamatan_dari_nama_file(uploaded_file.name) is not None:
+KOLOM_NILAI_METEO = ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]
+_KOLOM_TANGGAL = {"date", "tanggal", "tgl", "waktu", "time", "datetime"}
+
+
+def _format_lebar(df: pd.DataFrame) -> bool:
+    """True untuk format "lebar": kolom pertama tanggal, kolom lainnya = nama
+    kecamatan (satu kolom per kecamatan, satu baris per hari), seperti file
+    harian ERA5/CHIRPS. Satu file/sheet berisi SATU parameter."""
+    if df.shape[1] < 2:
         return False
+    if _normalisasi_nama_kolom(df.columns[0]) not in _KOLOM_TANGGAL:
+        return False
+    return any(_normalisasi_nama_kecamatan(c) in _KECAMATAN_NORM_LOOKUP for c in df.columns[1:])
+
+
+def _deteksi_parameter(label: str):
+    """Mengenali parameter meteorologi dari nama file / nama sheet, mis.
+    "Curah_Hujan.csv", "CH (mm)", "Suhu Udara (C)", "Kelembapan (%)",
+    "Kecepatan Angin (ms)". Mengembalikan (nama_kolom_baku, faktor_konversi),
+    ("abaikan", 1) untuk variabel yang tidak dipakai dashboard (u10, v10,
+    d2m), atau (None, 1) kalau tidak dikenali. Kecepatan angin dianggap
+    m/s dan dikali 3,6 jadi km/jam, kecuali namanya menyebut km/jam."""
+    token = set(re.split(r"[^a-z0-9]+", str(label).lower()))
+    token.discard("")
+    if token & {"u10", "v10", "d2m"} or any(t.startswith(("u10", "v10", "d2m")) for t in token):
+        return "abaikan", 1.0
+    if token & {"angin", "wind", "ws"}:
+        km = token & {"kmh", "km", "kmj", "kmjam"}
+        return "kecepatan_angin_kmh", 1.0 if km else 3.6
+    if token & {"kelembaban", "kelembapan", "humidity", "rh"}:
+        return "kelembaban_persen", 1.0
+    if token & {"suhu", "temperature", "temp", "t2m"}:
+        return "suhu_c", 1.0
+    if token & {"ch", "rr", "hujan", "curah", "precip", "precipitation", "rainfall", "chirps"}:
+        return "curah_hujan_mm_hari", 1.0
+    return None, 1.0
+
+
+def _kolom_ke_angka(seri: pd.Series) -> pd.Series:
+    """Mengubah kolom teks (desimal koma/titik) menjadi angka, cepat."""
+    teks = seri.astype(str).str.strip().str.replace(",", ".", regex=False)
+    angka = pd.to_numeric(teks, errors="coerce")
+    sisa = angka.isna() & seri.notna() & (seri.astype(str).str.strip() != "")
+    if sisa.any():
+        angka.loc[sisa] = seri[sisa].apply(_parse_angka)
+    return angka
+
+
+def _agregasi_format_lebar(df: pd.DataFrame, parameter: str, faktor: float) -> pd.DataFrame:
+    """Rata-rata seluruh hari per kecamatan untuk satu parameter."""
+    baris = {}
+    for kol in df.columns[1:]:
+        nilai = _kolom_ke_angka(df[kol]).mean() * faktor
+        nama = _KECAMATAN_NORM_LOOKUP.get(_normalisasi_nama_kecamatan(kol), str(kol).strip())
+        baris[nama] = nilai
+    out = pd.DataFrame({"kecamatan": list(baris.keys()), parameter: list(baris.values())})
+    for k in KOLOM_NILAI_METEO:
+        if k not in out.columns:
+            out[k] = np.nan
+    return out[["kecamatan"] + KOLOM_NILAI_METEO]
+
+
+def _perlu_pilih_manual_kecamatan(uploaded_file) -> bool:
+    """True kalau file format "panjang" TIDAK punya kolom kecamatan yang
+    dikenali DAN nama kecamatan tidak bisa ditebak dari nama filenya —
+    sehingga perlu dropdown pilihan manual di sidebar. File format lebar
+    (kolom = kecamatan) tidak pernah butuh pilihan manual."""
     try:
-        preview = _baca_csv_fleksibel(uploaded_file)
-        preview.columns = [str(c).strip() for c in preview.columns]
-        preview = _petakan_kolom_meteo(preview)
-        return "kecamatan" not in preview.columns
+        tabel = _baca_tabel_meteo(uploaded_file)
+        for df in tabel.values():
+            df.columns = [str(c).strip() for c in df.columns]
+            if _format_lebar(df):
+                return False
+        if cari_kecamatan_dari_nama_file(uploaded_file.name) is not None:
+            return False
+        for df in tabel.values():
+            if "kecamatan" in _petakan_kolom_meteo(df).columns:
+                return False
+        return True
     except Exception:
         return True
     finally:
         uploaded_file.seek(0)
 
 
-def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
-    """Membaca & mem-parse satu file CSV meteorologi, lalu mengagregasinya
-    (rata-rata) jadi satu baris per kecamatan. Mengembalikan
-    (DataFrame_teragregasi, None) kalau berhasil, atau (None, pesan_error)
-    kalau gagal — supaya file lain tetap bisa diproses walau satu file
-    bermasalah."""
-    try:
-        df_csv = _baca_csv_fleksibel(uploaded_file)
-    except Exception:
-        return None, f"File `{uploaded_file.name}` gagal dibaca sebagai CSV."
-
+def _agregasi_format_panjang(df_csv: pd.DataFrame, nama_file: str, kecamatan_override=None):
+    """Format "panjang": satu baris per pengamatan, ada kolom curah hujan
+    (dan opsional suhu, kelembaban, angin) serta kolom kecamatan (atau
+    kecamatan dari nama file). Mengembalikan (agregat, None) / (None, pesan)."""
     df_csv.columns = [str(c).strip() for c in df_csv.columns]
     df_csv = _petakan_kolom_meteo(df_csv)
 
-    if "curah_hujan_mm_hari" not in df_csv.columns:
+    if not any(k in df_csv.columns for k in KOLOM_NILAI_METEO):
         return None, (
-            f"File `{uploaded_file.name}` dilewati — tidak ada kolom curah hujan yang "
-            "dikenali (coba beri nama kolom seperti \"curah_hujan\", \"ch\", \"rr\", "
-            "atau \"curah hujan\")."
+            f"File `{nama_file}` dilewati — tidak ada kolom meteorologi yang dikenali "
+            "(mis. \"curah_hujan\", \"ch\", \"suhu\", \"kelembaban\", \"angin\"), dan bukan "
+            "format harian (kolom pertama date, kolom lain nama kecamatan)."
         )
 
-    for kol in ["suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
+    for kol in KOLOM_NILAI_METEO:
         if kol not in df_csv.columns:
             df_csv[kol] = np.nan
-
-    for kol in ["curah_hujan_mm_hari", "suhu_c", "kelembaban_persen", "kecepatan_angin_kmh"]:
-        df_csv[kol] = df_csv[kol].apply(_parse_angka)
+        else:
+            df_csv[kol] = df_csv[kol].apply(_parse_angka)
 
     if "kecamatan" in df_csv.columns and df_csv["kecamatan"].notna().any():
         df_csv["kecamatan"] = df_csv["kecamatan"].astype(str).str.strip()
-        # cocokkan tiap nilai ke ejaan resmi 40 kecamatan (case/spasi-insensitive);
-        # kalau tidak cocok, nilai aslinya dipertahankan apa adanya (akan
-        # ditandai "tidak dikenal" di tahap penggabungan)
         df_csv["kecamatan"] = df_csv["kecamatan"].apply(
             lambda v: _KECAMATAN_NORM_LOOKUP.get(_normalisasi_nama_kecamatan(v), v)
         )
@@ -708,21 +785,62 @@ def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
         df_csv["kecamatan"] = kecamatan_override
     else:
         return None, (
-            f"File `{uploaded_file.name}` dilewati — tidak ada kolom kecamatan, dan "
+            f"File `{nama_file}` dilewati — tidak ada kolom kecamatan, dan "
             "nama kecamatan tidak bisa ditebak dari nama filenya."
         )
 
-    df_csv = df_csv.dropna(subset=["curah_hujan_mm_hari", "kecamatan"])
+    df_csv = df_csv.dropna(subset=KOLOM_NILAI_METEO, how="all").dropna(subset=["kecamatan"])
     if df_csv.empty:
-        return None, f"File `{uploaded_file.name}` dilewati — tidak ada baris curah hujan yang valid."
+        return None, f"File `{nama_file}` dilewati — tidak ada baris data meteorologi yang valid."
 
-    agg = df_csv.groupby("kecamatan").agg(
-        curah_hujan_mm_hari=("curah_hujan_mm_hari", "mean"),
-        suhu_c=("suhu_c", "mean"),
-        kelembaban_persen=("kelembaban_persen", "mean"),
-        kecepatan_angin_kmh=("kecepatan_angin_kmh", "mean"),
-    ).reset_index()
+    agg = df_csv.groupby("kecamatan")[KOLOM_NILAI_METEO].mean().reset_index()
     return agg, None
+
+
+def _baca_satu_file_meteo(uploaded_file, kecamatan_override=None):
+    """Membaca satu file meteorologi (CSV atau Excel) dan mengagregasinya
+    (rata-rata seluruh periode) jadi satu baris per kecamatan, dengan kolom
+    curah_hujan_mm_hari, suhu_c, kelembaban_persen, kecepatan_angin_kmh
+    (kolom yang tidak ada di file diisi NaN). Dua bentuk file didukung:
+    - format LEBAR (harian): kolom pertama date, kolom lainnya kecamatan;
+      satu file/sheet = satu parameter, dikenali dari nama file/sheet;
+    - format PANJANG: satu baris per pengamatan dengan kolom kecamatan,
+      curah hujan, dst.
+    Mengembalikan (DataFrame, None) kalau berhasil, atau (None, pesan)."""
+    try:
+        tabel = _baca_tabel_meteo(uploaded_file)
+    except Exception as e:
+        return None, f"File `{uploaded_file.name}` gagal dibaca ({type(e).__name__}). File Excel butuh paket openpyxl."
+
+    bagian = []
+    catatan = []
+    for label, df in tabel.items():
+        df.columns = [str(c).strip() for c in df.columns]
+        if _format_lebar(df):
+            param, faktor = _deteksi_parameter(label) if label else (None, 1.0)
+            if param is None:
+                param, faktor = _deteksi_parameter(uploaded_file.name)
+            if param == "abaikan":
+                catatan.append(f"`{label or uploaded_file.name}` (variabel tidak dipakai dashboard)")
+                continue
+            if param is None:
+                catatan.append(
+                    f"`{label or uploaded_file.name}` — parameter tidak dikenali dari nama "
+                    "file/sheet (ubah nama jadi mis. Curah_Hujan, Suhu_Udara, Kelembaban, Kecepatan_Angin)"
+                )
+                continue
+            bagian.append(_agregasi_format_lebar(df, param, faktor))
+        else:
+            agg, err = _agregasi_format_panjang(df, uploaded_file.name, kecamatan_override)
+            if err:
+                catatan.append(err)
+            else:
+                bagian.append(agg)
+
+    if not bagian:
+        return None, f"File `{uploaded_file.name}` dilewati — " + "; ".join(catatan or ["tidak ada data yang bisa dibaca."])
+    gabung = pd.concat(bagian, ignore_index=True).groupby("kecamatan", as_index=False)[KOLOM_NILAI_METEO].mean()
+    return gabung, None
 
 
 def load_meteo_data_multi(uploaded_files, kecamatan_override_map: dict):
@@ -759,13 +877,32 @@ def load_meteo_data_multi(uploaded_files, kecamatan_override_map: dict):
 
     gabungan = pd.concat(semua_hasil, ignore_index=True)
 
-    duplikat = sorted(gabungan["kecamatan"][gabungan["kecamatan"].duplicated()].unique())
+    # duplikat = kecamatan yang punya nilai untuk PARAMETER YANG SAMA di >1 file
+    # (beda parameter di beda file, mis. Curah_Hujan.csv + Suhu_Udara.csv, wajar)
+    dup_set = set()
+    for kol in KOLOM_NILAI_METEO:
+        ada = gabungan.loc[gabungan[kol].notna(), "kecamatan"]
+        dup_set |= set(ada[ada.duplicated()])
+    duplikat = sorted(dup_set)
     if duplikat:
         pesan.append(
             "Kecamatan berikut muncul di lebih dari satu file meteorologi — nilainya "
             "dirata-ratakan antar file: " + ", ".join(duplikat)
         )
     gabungan = gabungan.groupby("kecamatan", as_index=False).mean(numeric_only=True)
+    for kol in KOLOM_NILAI_METEO:
+        if kol not in gabungan.columns:
+            gabungan[kol] = np.nan
+    if gabungan["curah_hujan_mm_hari"].isna().all():
+        pesan.append(
+            "Data curah hujan belum ada di file yang diunggah (dibutuhkan untuk indeks risiko). "
+            "Unggah juga file curah hujan, mis. Curah_Hujan.csv."
+        )
+        return pd.DataFrame(columns=kolom_kosong), pesan
+    kurang = [n for k, n in [("suhu_c", "suhu"), ("kelembaban_persen", "kelembaban"),
+                             ("kecepatan_angin_kmh", "kecepatan angin")] if gabungan[k].isna().all()]
+    if kurang:
+        pesan.append("Parameter belum ada di file yang diunggah (ditampilkan kosong): " + ", ".join(kurang) + ".")
 
     kecamatan_dikenal = set(_KECAMATAN_NORM_LOOKUP.values())
     tidak_dikenal = sorted(set(gabungan["kecamatan"]) - kecamatan_dikenal)
@@ -831,6 +968,11 @@ def compute_risk_index(df_events: pd.DataFrame, df_meteo: pd.DataFrame, daftar_k
 
 def _ada(v) -> bool:
     return v is not None and not pd.isna(v)
+
+
+def _fmt(v, desimal=1) -> str:
+    """Format angka; '-' kalau kosong (parameter belum diunggah)."""
+    return "-" if not _ada(v) else f"{v:.{desimal}f}"
 
 
 def teks_hover_titik(r, dengan_meteo: bool) -> str:
@@ -933,9 +1075,9 @@ def susun_interpretasi(df_kec, nama_kec, m, rata, rank, total) -> list:
         return out
 
     out.append(
-        f"Meteorologi rata-rata kecamatan: curah hujan {m['curah_hujan_mm_hari']:.1f} mm/hari "
-        f"({m['kategori_intensitas']}), suhu {m['suhu_c']:.1f} °C, kelembaban {m['kelembaban_persen']:.0f}%, "
-        f"angin {m['kecepatan_angin_kmh']:.1f} km/jam."
+        f"Meteorologi rata-rata kecamatan: curah hujan {_fmt(m['curah_hujan_mm_hari'])} mm/hari "
+        f"({m['kategori_intensitas']}), suhu {_fmt(m['suhu_c'])} °C, kelembaban {_fmt(m['kelembaban_persen'], 0)}%, "
+        f"angin {_fmt(m['kecepatan_angin_kmh'])} km/jam."
     )
     if rank is not None:
         out.append(f"Curah hujan kecamatan ini peringkat **{rank} dari {total}** kecamatan pada data meteorologi (1 = tertinggi).")
@@ -1169,7 +1311,12 @@ BANTUAN_BENCANA = (
 )
 
 BANTUAN_METEO = (
-    "Tiap file boleh berisi satu kecamatan (nama kecamatan dikenali dari nama "
+    "FORMAT HARIAN (mis. ERA5/CHIRPS): kolom pertama date, kolom lainnya nama kecamatan, "
+    "satu file = satu parameter. Parameter dikenali dari NAMA FILE: Curah_Hujan.csv, "
+    "Suhu_Udara.csv, Kelembaban.csv, Kecepatan_Angin.csv (angin dianggap m/s, otomatis "
+    "dikonversi ke km/jam). File Excel (.xlsx) dengan satu sheet per parameter juga bisa "
+    "(dikenali dari nama sheet). Nilai dirata-ratakan seluruh periode. "
+    "FORMAT LAIN: tiap file boleh berisi satu kecamatan (nama kecamatan dikenali dari nama "
     "filenya, mis. \"cibinong.csv\", atau dari kolom kecamatan di dalam file) atau "
     "beberapa kecamatan sekaligus (butuh kolom kecamatan). Nama kolom fleksibel: "
     "\"curah hujan\", \"ch\", \"rr\", \"curah_hujan_mm_hari\" semua dikenali. "
@@ -1179,7 +1326,7 @@ BANTUAN_METEO = (
 )
 
 
-def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadangan, bantuan):
+def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadangan, bantuan, tipe=None):
     """Widget sidebar untuk mengunggah data CSV dengan DUA pilihan cara:
     'Pilih file CSV' (satu atau banyak file sekaligus) atau 'Pilih folder'
     (semua CSV di dalam satu folder). Dipakai sama persis untuk data
@@ -1188,7 +1335,8 @@ def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadanga
     Mode "directory" pada st.file_uploader membuka dialog pilih-folder dan
     hanya bisa memilih folder (bukan file satuan), makanya dibuat dua mode
     terpisah lewat radio. Mengembalikan daftar file (kosong kalau belum
-    ada yang diunggah)."""
+    ada yang diunggah). `tipe` = daftar ekstensi yang diterima (default csv)."""
+    tipe = tipe or ["csv"]
     mode = st.radio(
         label_mode,
         ["Pilih file CSV", "Pilih folder"],
@@ -1199,7 +1347,7 @@ def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadanga
         try:
             files = st.file_uploader(
                 label_folder,
-                type=["csv"],
+                type=tipe,
                 accept_multiple_files="directory",
                 key=f"{kunci}_folder",
                 help="Pilih SATU FOLDER; semua file CSV di dalamnya ikut terunggah. " + bantuan,
@@ -1211,7 +1359,7 @@ def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadanga
             )
             files = st.file_uploader(
                 label_cadangan,
-                type=["csv"],
+                type=tipe,
                 accept_multiple_files=True,
                 key=f"{kunci}_file_cadangan",
                 help=bantuan,
@@ -1219,7 +1367,7 @@ def widget_unggah_csv(kunci, label_mode, label_file, label_folder, label_cadanga
     else:
         files = st.file_uploader(
             label_file,
-            type=["csv"],
+            type=tipe,
             accept_multiple_files=True,
             key=f"{kunci}_file",
             help=bantuan,
@@ -1244,10 +1392,11 @@ with st.sidebar:
     uploaded_meteo_files = widget_unggah_csv(
         "meteo",
         label_mode="Cara unggah data meteorologi",
-        label_file="Unggah CSV data meteorologi (boleh lebih dari satu file — satu per kecamatan, atau gabungan)",
-        label_folder="Unggah folder berisi CSV data meteorologi (satu per kecamatan, atau gabungan)",
-        label_cadangan="Unggah CSV data meteorologi (boleh lebih dari satu file)",
+        label_file="Unggah file data meteorologi (CSV/Excel, boleh banyak file — mis. satu per parameter)",
+        label_folder="Unggah folder berisi file data meteorologi (CSV/Excel)",
+        label_cadangan="Unggah file data meteorologi (CSV/Excel, boleh banyak file)",
         bantuan=BANTUAN_METEO,
+        tipe=["csv", "xlsx"],
     )
 
     ada_data_bencana = len(uploaded_bencana_files) > 0
@@ -1799,10 +1948,10 @@ with tab_utama:
     )
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Curah Hujan (mm/hari)", f"{df_meteo['curah_hujan_mm_hari'].mean():.1f}")
-    m2.metric("Suhu (°C)", f"{df_meteo['suhu_c'].mean():.1f}")
-    m3.metric("Kelembaban (%)", f"{df_meteo['kelembaban_persen'].mean():.0f}")
-    m4.metric("Kecepatan Angin (km/jam)", f"{df_meteo['kecepatan_angin_kmh'].mean():.1f}")
+    m1.metric("Curah Hujan (mm/hari)", _fmt(df_meteo['curah_hujan_mm_hari'].mean(), 1))
+    m2.metric("Suhu (°C)", _fmt(df_meteo['suhu_c'].mean(), 1))
+    m3.metric("Kelembaban (%)", _fmt(df_meteo['kelembaban_persen'].mean(), 0))
+    m4.metric("Kecepatan Angin (km/jam)", _fmt(df_meteo['kecepatan_angin_kmh'].mean(), 1))
 
     tab1, tab2 = st.tabs(["Curah hujan per kecamatan", "Tabel indikator lengkap"])
 
