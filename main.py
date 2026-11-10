@@ -174,8 +174,31 @@ button[data-baseweb="tab"] {
     height: auto !important;
 }
 [data-baseweb="tab-highlight"] { height: 2.5px !important; }
+/* Tab utama dipindah ke header Streamlit (bar paling atas yang selalu terlihat
+   saat scroll), di kiri tombol Fork/Deploy dan titik tiga. Tab di dalam tab
+   (mis. "Curah hujan per kecamatan") tidak ikut dipindah. Memakai atribut
+   role="tablist"/"tab" supaya jalan di berbagai versi Streamlit. */
+[role="tablist"]:not([role="tabpanel"] [role="tablist"]) {
+    position: fixed !important;
+    top: 0;
+    right: 11rem;
+    height: 3.75rem !important;
+    max-width: calc(100vw - 14rem);
+    z-index: 1000000;
+    align-items: center;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    gap: 4px;
+}
+[role="tablist"]:not([role="tabpanel"] [role="tablist"])::before, [role="tablist"]:not([role="tabpanel"] [role="tablist"])::after { display: none !important; }
+[role="tablist"]:not([role="tabpanel"] [role="tablist"]) [role="tab"] {
+    height: 3.75rem !important;
+    min-height: 0 !important;
+    padding: 0 14px !important;
+}
 .block-container {
-    padding-top: 3.5rem; padding-bottom: 3rem; max-width: 1360px;
+    padding-top: calc(4.5rem + 44px); padding-bottom: 3rem; max-width: 1360px;
     padding-left: 3rem; padding-right: 3rem;
     position: relative;
 }
@@ -183,7 +206,7 @@ button[data-baseweb="tab"] {
 div[data-testid="stElementContainer"]:has(.logo-bar),
 .element-container:has(.logo-bar) {
     position: absolute;
-    top: 3.5rem;
+    top: 4.5rem;
     right: 3rem;
     height: 44px;
     width: auto;
@@ -261,9 +284,22 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.mini-stat-card) {
 }
 .home-footer { text-align: center; opacity: 0.65; font-size: 0.8rem; padding: 6px 0 2px; }
 
-/* Layar kecil (HP): logo di baris sendiri, tab turun di bawahnya */
+/* Layar kecil (HP): header terlalu sempit untuk tab, jadi tab kembali ke
+   alur halaman (di bawah logo) */
 @media (max-width: 768px) {
+    [role="tablist"]:not([role="tabpanel"] [role="tablist"]) {
+        position: static !important;
+        height: auto !important;
+        max-width: none;
+        z-index: auto;
+        margin-top: 52px;
+    }
+    [role="tablist"]:not([role="tabpanel"] [role="tablist"]) [role="tab"] {
+        height: auto !important;
+        min-height: 44px !important;
+    }
     .block-container {
+        padding-top: 4.5rem;
         padding-left: 1rem;
         padding-right: 1rem;
     }
@@ -278,14 +314,6 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.mini-stat-card) {
     }
     .logo-bar img {
         height: 24px;
-    }
-    /* turunkan tab utama supaya tidak tertimpa logo */
-    [data-testid="stTabs"] > [data-baseweb="tab-list"] {
-        margin-top: 52px;
-    }
-    /* tab di dalam tab (mis. "Curah hujan per kecamatan") tidak ikut turun */
-    [data-testid="stTabs"] [data-testid="stTabs"] > [data-baseweb="tab-list"] {
-        margin-top: 0;
     }
     .hero { padding: 20px 18px 18px; }
     .hero-title { font-size: 1.5rem; }
@@ -1090,6 +1118,7 @@ def susun_interpretasi(df_kec, nama_kec, m, rata, rank, total) -> list:
                "pada hari kejadian, dan perbandingannya bersifat deskriptif — bukan bukti sebab-akibat. "
                "Untuk analisis yang lebih tajam gunakan data harian yang dicocokkan dengan tanggal kejadian.*")
     return out
+
 
 
 # ---------------------------------------------------------------------------
