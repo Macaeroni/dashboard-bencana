@@ -108,10 +108,6 @@ Struktur file:
 """
 
 import base64
-import json
-import urllib.parse
-import urllib.request
-from datetime import datetime
 import re
 import os
 from io import StringIO
@@ -1097,85 +1093,6 @@ def susun_interpretasi(df_kec, nama_kec, m, rata, rank, total) -> list:
 
 
 # ---------------------------------------------------------------------------
-# 3.6 CUACA HARI INI (API Open-Meteo, tanpa API key)
-# ---------------------------------------------------------------------------
-# Diambil langsung dari internet saat dashboard dibuka, di-cache 30 menit.
-# Ini keluaran model cuaca (prakiraan/analisis), BUKAN observasi stasiun BMKG.
-# Kalau server tidak bisa mengakses internet, bagian ini menampilkan pesan
-# dan dashboard lainnya tetap berjalan.
-
-KODE_CUACA_WMO = {
-    0: "Cerah", 1: "Cerah berawan", 2: "Berawan sebagian", 3: "Berawan tebal",
-    45: "Berkabut", 48: "Berkabut", 51: "Gerimis ringan", 53: "Gerimis", 55: "Gerimis lebat",
-    61: "Hujan ringan", 63: "Hujan sedang", 65: "Hujan lebat", 66: "Hujan beku ringan",
-    67: "Hujan beku lebat", 80: "Hujan lokal ringan", 81: "Hujan lokal sedang",
-    82: "Hujan lokal sangat lebat", 95: "Badai petir", 96: "Badai petir + es", 99: "Badai petir + es lebat",
-}
-
-
-@st.cache_data(ttl=1800, show_spinner=False)
-def ambil_cuaca_hari_ini(lat: float, lon: float) -> dict:
-    """Cuaca saat ini + ringkasan harian untuk satu titik. Melempar
-    exception kalau gagal (supaya kegagalan tidak ikut ter-cache)."""
-    params = {
-        "latitude": f"{lat:.3f}", "longitude": f"{lon:.3f}",
-        "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code",
-        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,"
-                 "precipitation_probability_max,wind_speed_10m_max",
-        "timezone": "Asia/Jakarta", "forecast_days": 1, "wind_speed_unit": "kmh",
-    }
-    url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "dashboard-bencana-bogor"})
-    with urllib.request.urlopen(req, timeout=8) as r:
-        return json.load(r)
-
-
-def section_cuaca_hari_ini():
-    """Panel cuaca hari ini di bagian paling atas tab Dashboard Utama."""
-    st.markdown("#### Cuaca hari ini")
-    c_pilih, c_info = st.columns([1, 3])
-    with c_pilih:
-        nama_kec = [k["n"] for k in KECAMATAN_BOGOR]
-        kec = st.selectbox(
-            "Lokasi", nama_kec,
-            index=nama_kec.index("Cibinong") if "Cibinong" in nama_kec else 0,
-            key="cuaca_hari_ini_kec",
-        )
-    titik = next(k for k in KECAMATAN_BOGOR if k["n"] == kec)
-    try:
-        data = ambil_cuaca_hari_ini(titik["lat"], titik["lon"])
-        cur, day = data["current"], data["daily"]
-    except Exception:
-        with c_info:
-            st.info(
-                "Cuaca hari ini belum bisa dimuat (server tidak dapat mengakses layanan "
-                "cuaca atau sedang gangguan). Bagian dashboard lainnya tidak terpengaruh."
-            )
-        return
-
-    hujan_hari = day["precipitation_sum"][0]
-    kondisi = KODE_CUACA_WMO.get(cur.get("weather_code"), "—")
-    with c_info:
-        st.markdown(f"**{kondisi}** di {kec}")
-        st.caption(
-            f"Perkiraan hujan hari ini: {hujan_hari:.1f} mm "
-            f"({klasifikasi_curah_hujan(hujan_hari)}) · "
-            f"Waktu data: {str(cur.get('time', '')).replace('T', ' ')} WIB"
-        )
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Suhu sekarang", f"{cur['temperature_2m']:.1f} °C")
-    k2.metric("Min / Maks", f"{day['temperature_2m_min'][0]:.0f} / {day['temperature_2m_max'][0]:.0f} °C")
-    k3.metric("Kelembaban", f"{cur['relative_humidity_2m']:.0f} %")
-    k4.metric("Peluang hujan", f"{day['precipitation_probability_max'][0] or 0:.0f} %")
-    k5.metric("Angin maks", f"{day['wind_speed_10m_max'][0]:.0f} km/jam")
-    st.caption(
-        "Sumber: Open-Meteo (model cuaca, bukan observasi stasiun BMKG), diperbarui tiap 30 menit. "
-        "Untuk peringatan resmi, rujuk BMKG."
-    )
-    st.markdown("---")
-
-
-# ---------------------------------------------------------------------------
 # 4. PEMUATAN DATA KEJADIAN BENCANA
 # ---------------------------------------------------------------------------
 
@@ -1873,8 +1790,6 @@ with tab_home:
     halaman_home(df_all, kecamatan_aktif, ada_data_bencana, ada_data_meteo)
 
 with tab_utama:
-    section_cuaca_hari_ini()
-
     # ---------------------------------------------------------------------------
     # 6. HEADER & BARIS KPI
     # ---------------------------------------------------------------------------
