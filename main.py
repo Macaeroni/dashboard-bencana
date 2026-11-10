@@ -1,6 +1,6 @@
 """
 Dashboard Pemantauan Bencana — Kabupaten Bogor
-================================================
+===============================================
 Prototipe dashboard interaktif berbasis Streamlit, cakupan Kabupaten
 Bogor (40 kecamatan), dengan data meteorologi per kecamatan yang
 ditampilkan langsung di titik kejadian pada peta (hover), disertai
