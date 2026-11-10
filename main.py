@@ -198,26 +198,29 @@ button[data-baseweb="tab"] {
     padding: 0 14px !important;
 }
 .block-container {
-    padding-top: calc(4.5rem + 44px); padding-bottom: 3rem; max-width: 1360px;
+    padding-top: 4.5rem; padding-bottom: 3rem; max-width: 1360px;
     padding-left: 3rem; padding-right: 3rem;
     position: relative;
 }
-/* Logo di ujung kanan, sejajar baris tab */
+/* Logo di ujung kiri header (bar paling atas yang selalu terlihat), sejajar
+   dengan tab di sisi kanan. left 3.5rem menyisakan ruang untuk tombol
+   buka/tutup sidebar; pointer-events none supaya tidak menghalangi klik. */
 div[data-testid="stElementContainer"]:has(.logo-bar),
 .element-container:has(.logo-bar) {
-    position: absolute;
-    top: 4.5rem;
-    right: 3rem;
-    height: 44px;
+    position: fixed;
+    top: 0;
+    left: 3.5rem;
+    height: 3.75rem;
     width: auto;
-    z-index: 5;
+    z-index: 1000000;
+    pointer-events: none;
 }
 .logo-bar {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 14px;
-    height: 44px;
+    height: 3.75rem;
 }
 .logo-bar img {
     height: 28px;
@@ -284,36 +287,47 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.mini-stat-card) {
 }
 .home-footer { text-align: center; opacity: 0.65; font-size: 0.8rem; padding: 6px 0 2px; }
 
-/* Layar kecil (HP): header terlalu sempit untuk tab, jadi tab kembali ke
-   alur halaman (di bawah logo) */
+/* Layar kecil (HP): logo tetap di kiri header (lebih kecil), sedangkan tab
+   pindah jadi bar kedua tepat di bawah header (lebar penuh, bisa digeser
+   ke samping) dan tetap terlihat saat scroll. */
 @media (max-width: 768px) {
     [role="tablist"]:not([role="tabpanel"] [role="tablist"]) {
-        position: static !important;
-        height: auto !important;
+        position: fixed !important;
+        top: 3.75rem;
+        left: 0;
+        right: 0;
+        width: 100vw;
         max-width: none;
-        z-index: auto;
-        margin-top: 52px;
+        height: 2.75rem !important;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        gap: 0;
+        padding: 0 0.5rem;
+        z-index: 999980;
+        background: Canvas !important;
+        border-bottom: 1px solid rgba(127,127,127,0.25) !important;
     }
     [role="tablist"]:not([role="tabpanel"] [role="tablist"]) [role="tab"] {
-        height: auto !important;
-        min-height: 44px !important;
+        height: 2.75rem !important;
+        padding: 0 12px !important;
+        white-space: nowrap;
+        flex: 0 0 auto;
+        font-size: 0.9rem;
     }
     .block-container {
-        padding-top: 4.5rem;
+        padding-top: 6.75rem;
         padding-left: 1rem;
         padding-right: 1rem;
     }
     div[data-testid="stElementContainer"]:has(.logo-bar),
     .element-container:has(.logo-bar) {
-        right: 1rem;
-        left: 1rem;
+        left: 3.25rem;
+        max-width: calc(100vw - 3.25rem - 7.5rem);
+        overflow: hidden;
     }
-    .logo-bar {
-        justify-content: flex-end;
-        gap: 10px;
-    }
+    .logo-bar { gap: 8px; }
     .logo-bar img {
-        height: 24px;
+        height: 22px;
     }
     .hero { padding: 20px 18px 18px; }
     .hero-title { font-size: 1.5rem; }
